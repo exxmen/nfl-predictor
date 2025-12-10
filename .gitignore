@@ -32,3 +32,6 @@ results/
 .idea/
 .vscode/
 *.swp
+
+# Claude
+.claude/

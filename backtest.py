@@ -285,14 +285,15 @@ class NFLBacktester:
             print(f"  ⚠️  No remaining games from week {from_week}")
             return {}
         
-        # Run simulation
+        # Run simulation with correct season for EPA data
         results = run_advanced_simulation(
             standings=standings_list,
             completed_games=completed_games,
             remaining_games=remaining_games,
             n_simulations=n_simulations,
             show_progress=False,
-            use_epa=self.use_epa
+            use_epa=self.use_epa,
+            season=season
         )
         
         return results

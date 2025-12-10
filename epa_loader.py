@@ -15,8 +15,13 @@ import json
 
 # Cache directory
 CACHE_DIR = Path("data")
-EPA_CACHE_FILE = CACHE_DIR / "team_epa_cache.parquet"
-EPA_META_FILE = CACHE_DIR / "team_epa_meta.json"
+
+def get_cache_files(season: int) -> tuple:
+    """Get cache file paths for a specific season."""
+    return (
+        CACHE_DIR / f"team_epa_{season}.parquet",
+        CACHE_DIR / f"team_epa_{season}_meta.json"
+    )
 
 # NFL week start dates for 2025 (for cache invalidation)
 NFL_2025_WEEK_STARTS = {
@@ -37,16 +42,25 @@ def get_current_nfl_week() -> int:
             current_week = week
     return current_week
 
-
-def is_cache_valid() -> bool:
-    """Check if EPA cache is still valid for current NFL week."""
-    if not EPA_META_FILE.exists():
+def is_cache_valid(season: int) -> bool:
+    """Check if EPA cache is still valid for the given season."""
+    cache_file, meta_file = get_cache_files(season)
+    
+    if not meta_file.exists():
         return False
     
     try:
-        with open(EPA_META_FILE) as f:
+        with open(meta_file) as f:
             meta = json.load(f)
         
+        cached_season = meta.get("season", 0)
+        
+        # For past seasons, cache is always valid (data won't change)
+        current_year = datetime.now().year
+        if season < current_year:
+            return cached_season == season
+        
+        # For current season, check week-based invalidation
         cached_week = meta.get("week", 0)
         current_week = get_current_nfl_week()
         
@@ -79,10 +93,13 @@ def load_team_epa(season: int = 2025, force_refresh: bool = False) -> pd.DataFra
     """
     CACHE_DIR.mkdir(exist_ok=True)
     
+    # Get season-specific cache files
+    cache_file, meta_file = get_cache_files(season)
+    
     # Check cache
-    if not force_refresh and EPA_CACHE_FILE.exists() and is_cache_valid():
-        print(f"📊 Loading EPA data from cache...")
-        return pd.read_parquet(EPA_CACHE_FILE)
+    if not force_refresh and cache_file.exists() and is_cache_valid(season):
+        print(f"📊 Loading {season} EPA data from cache...")
+        return pd.read_parquet(cache_file)
     
     # Try to fetch the requested season, fall back to most recent available
     seasons_to_try = [season, season - 1, 2024, 2023]
@@ -104,9 +121,9 @@ def load_team_epa(season: int = 2025, force_refresh: bool = False) -> pd.DataFra
     if pbp is None:
         print(f"❌ Failed to fetch PBP data for any season")
         # Try to return stale cache if available
-        if EPA_CACHE_FILE.exists():
+        if cache_file.exists():
             print("⚠️  Returning stale cache...")
-            return pd.read_parquet(EPA_CACHE_FILE)
+            return pd.read_parquet(cache_file)
         raise RuntimeError("No PBP data available and no cache exists")
     
     # Filter to real plays (exclude penalties, timeouts, etc.)
@@ -209,20 +226,20 @@ def load_team_epa(season: int = 2025, force_refresh: bool = False) -> pd.DataFra
         if col in team_epa.columns:
             team_epa[col] = team_epa[col].round(3)
     
-    # Save cache
-    team_epa.to_parquet(EPA_CACHE_FILE, index=False)
+    # Save cache (season-specific)
+    team_epa.to_parquet(cache_file, index=False)
     
     # Save metadata
     meta = {
-        "season": season,
-        "week": get_current_nfl_week(),
+        "season": actual_season,
+        "week": get_current_nfl_week() if actual_season >= datetime.now().year else 18,
         "updated": datetime.now().isoformat(),
         "teams": len(team_epa)
     }
-    with open(EPA_META_FILE, 'w') as f:
+    with open(meta_file, 'w') as f:
         json.dump(meta, f, indent=2)
     
-    print(f"💾 Cached EPA data for {len(team_epa)} teams (Week {meta['week']})")
+    print(f"💾 Cached {actual_season} EPA data for {len(team_epa)} teams")
     
     return team_epa
 

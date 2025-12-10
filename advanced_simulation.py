@@ -285,7 +285,8 @@ def run_advanced_simulation(
     remaining_games: List[Game],
     n_simulations: int = 10000,
     show_progress: bool = True,
-    use_epa: bool = True
+    use_epa: bool = True,
+    season: int = 2025
 ) -> Dict[str, Dict]:
     """
     Run Monte Carlo simulation with real NFL tiebreakers.
@@ -297,6 +298,7 @@ def run_advanced_simulation(
         n_simulations: Number of simulations to run
         show_progress: Whether to show progress bar
         use_epa: Whether to use EPA-based Poisson model (if available)
+        season: NFL season year (for loading correct EPA data)
     
     Returns:
         Dictionary with simulation results for each team
@@ -305,7 +307,7 @@ def run_advanced_simulation(
     epa_df = None
     if use_epa and EPA_AVAILABLE:
         try:
-            epa_df = load_team_epa()
+            epa_df = load_team_epa(season=season)
             print("📊 Using EPA-based Poisson scoring model")
         except Exception as e:
             print(f"⚠️  EPA data unavailable ({e}), using traditional model")
