@@ -192,7 +192,126 @@ def format_results(results: dict, n_simulations: int) -> str:
     return '\n'.join(lines)
 
 
-def save_results(report: str, results: dict, n_simulations: int):
+def format_results_markdown(results: dict, n_simulations: int) -> str:
+    """Format results as a properly formatted Markdown document"""
+    from nfl_tiebreakers import TEAM_TO_DIVISION
+    
+    teams_data = results['teams_data']
+    sim_results = results['results']
+    current_week = get_current_nfl_week()
+    
+    lines = []
+    
+    # Header
+    lines.append(f"# 🏈 NFL Playoff Probabilities - Week {current_week}")
+    lines.append("")
+    lines.append(f"**Generated:** {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
+    lines.append(f"**Simulations:** {n_simulations:,}")
+    lines.append(f"**Games:** {results['completed_games']} completed, {results['remaining_games']} remaining")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    
+    # Process each conference
+    for conf in ['AFC', 'NFC']:
+        conf_teams = {t['name']: t for t in teams_data if t['conf'] == conf}
+        conf_results = {name: sim_results[name] for name in conf_teams if name in sim_results}
+        
+        lines.append(f"## {conf} Playoff Picture")
+        lines.append("")
+        
+        # Sort by playoff probability
+        sorted_teams = sorted(
+            conf_results.items(),
+            key=lambda x: x[1]['playoff_count'],
+            reverse=True
+        )
+        
+        # Division leaders
+        div_leaders = {}
+        for div in ['East', 'North', 'South', 'West']:
+            div_teams = [
+                (name, r) for name, r in conf_results.items()
+                if TEAM_TO_DIVISION.get(name) == div
+            ]
+            if div_teams:
+                leader = max(div_teams, key=lambda x: x[1]['division_winner_count'])
+                div_leaders[div] = leader[0]
+        
+        # Division Leaders Table
+        lines.append("### 🏆 Division Leaders")
+        lines.append("")
+        lines.append("| Division | Team | Div % | Playoff % | Avg Wins |")
+        lines.append("|:---------|:-----|------:|----------:|---------:|")
+        
+        for div in ['East', 'North', 'South', 'West']:
+            if div in div_leaders:
+                name = div_leaders[div]
+                r = conf_results[name]
+                div_pct = (r['division_winner_count'] / n_simulations) * 100
+                playoff_pct = (r['playoff_count'] / n_simulations) * 100
+                avg_wins = r.get('avg_wins', 0)
+                lines.append(f"| {div} | {name} | {div_pct:.1f}% | {playoff_pct:.1f}% | {avg_wins:.1f} |")
+        
+        lines.append("")
+        
+        # Wild Card Race
+        lines.append("### 🎯 Wild Card Race")
+        lines.append("")
+        lines.append("| # | Team | WC % | Playoff % | Avg Wins |")
+        lines.append("|:-:|:-----|-----:|----------:|---------:|")
+        
+        wc_candidates = [
+            (name, r) for name, r in sorted_teams
+            if name not in div_leaders.values()
+        ]
+        
+        for i, (name, r) in enumerate(wc_candidates[:3], 1):
+            wc_pct = (r['wildcard_count'] / n_simulations) * 100
+            playoff_pct = (r['playoff_count'] / n_simulations) * 100
+            avg_wins = r.get('avg_wins', 0)
+            lines.append(f"| {i} | {name} | {wc_pct:.1f}% | {playoff_pct:.1f}% | {avg_wins:.1f} |")
+        
+        lines.append("")
+        
+        # Outside Looking In
+        lines.append("### 👀 Outside Looking In")
+        lines.append("")
+        lines.append("| # | Team | WC % | Playoff % | Avg Wins |")
+        lines.append("|:-:|:-----|-----:|----------:|---------:|")
+        
+        for i, (name, r) in enumerate(wc_candidates[3:6], 1):
+            wc_pct = (r['wildcard_count'] / n_simulations) * 100
+            playoff_pct = (r['playoff_count'] / n_simulations) * 100
+            avg_wins = r.get('avg_wins', 0)
+            lines.append(f"| {i} | {name} | {wc_pct:.1f}% | {playoff_pct:.1f}% | {avg_wins:.1f} |")
+        
+        lines.append("")
+        
+        # Seed Distribution
+        lines.append("### 📊 Seed Distribution")
+        lines.append("")
+        lines.append("| Team | 1st | 2nd | 3rd | 4th | 5th | 6th | 7th |")
+        lines.append("|:-----|----:|----:|----:|----:|----:|----:|----:|")
+        
+        for name, r in sorted_teams[:10]:
+            seed_pcts = []
+            for seed in range(1, 8):
+                pct = (r['seed_counts'][seed] / n_simulations) * 100
+                seed_pcts.append(f"{pct:.1f}%")
+            lines.append(f"| {name} | {' | '.join(seed_pcts)} |")
+        
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+    
+    # Footer
+    lines.append("*Probabilities based on Monte Carlo simulation with full NFL tiebreaker rules.*")
+    
+    return '\n'.join(lines)
+
+
+def save_results(report: str, markdown_report: str, results: dict, n_simulations: int):
     """Save results to dated files"""
     today = date.today()
     current_week = get_current_nfl_week()
@@ -205,7 +324,13 @@ def save_results(report: str, results: dict, n_simulations: int):
     report_file = f"{results_dir}/nfl_predictions_week{current_week}_{today.strftime('%Y%m%d')}.txt"
     with open(report_file, 'w') as f:
         f.write(report)
-    print(f"📄 Saved report to {report_file}")
+    print(f"📄 Saved text report to {report_file}")
+    
+    # Save markdown report
+    md_file = f"{results_dir}/nfl_predictions_week{current_week}_{today.strftime('%Y%m%d')}.md"
+    with open(md_file, 'w') as f:
+        f.write(markdown_report)
+    print(f"📝 Saved markdown report to {md_file}")
     
     # Save JSON data for further analysis
     json_file = f"{results_dir}/nfl_predictions_week{current_week}_{today.strftime('%Y%m%d')}.json"
@@ -281,13 +406,16 @@ def main():
         traceback.print_exc()
         sys.exit(1)
     
-    # Format and display results
+    # Format results
     report = format_results(results, args.simulations)
+    markdown_report = format_results_markdown(results, args.simulations)
+    
+    # Display text report
     print("\n" + report)
     
     # Save results
     print("\n💾 Saving results...")
-    save_results(report, results, args.simulations)
+    save_results(report, markdown_report, results, args.simulations)
     
     print("\n✅ Scheduled run complete!")
 
