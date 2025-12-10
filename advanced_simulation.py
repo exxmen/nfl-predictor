@@ -2,9 +2,10 @@
 Advanced NFL Playoff Simulation with Real Tiebreakers
 
 This module provides the enhanced Monte Carlo simulation using:
+- EPA (Expected Points Added) for matchup-adjusted scoring
+- Poisson distribution for realistic NFL score modeling
 - Real NFL tiebreaker rules
 - Game-by-game simulation
-- Team scoring averages
 - Progress tracking
 """
 
@@ -12,12 +13,170 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
+from scipy.stats import poisson
+import pandas as pd
 
 from nfl_tiebreakers import (
     Game, TeamStats, SeasonData,
     TEAM_TO_CONFERENCE, TEAM_TO_DIVISION,
     NFLTiebreaker, GameSimulator
 )
+
+# Try to import EPA loader (optional enhancement)
+try:
+    from epa_loader import load_team_epa, get_league_averages
+    EPA_AVAILABLE = True
+except ImportError:
+    EPA_AVAILABLE = False
+
+
+class EPAGameSimulator:
+    """
+    Enhanced game simulator using EPA and Poisson scoring model.
+    
+    EPA (Expected Points Added) adjusts for game situation and opponent strength,
+    providing more accurate matchup predictions than raw scoring averages.
+    
+    Poisson distribution models NFL scoring realistically (discrete, skewed toward
+    lower scores) compared to Gaussian which can produce unrealistic scores.
+    """
+    
+    # Home field advantage in points (historical NFL average ~2.5)
+    HOME_ADVANTAGE = 2.5
+    
+    # League average PPG (used as baseline)
+    LEAGUE_AVG_PPG = 22.0
+    
+    # EPA scaling factor: how much EPA/play affects expected points
+    # ~0.1 EPA/play difference ≈ 3-4 points per game
+    EPA_SCALING = 35.0  # Multiply EPA by this to get point adjustment
+    
+    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None):
+        """
+        Initialize EPA-based simulator.
+        
+        Args:
+            epa_df: DataFrame with team EPA stats (from epa_loader.py)
+            season_data: Traditional SeasonData for fallback
+        """
+        self.epa_df = epa_df
+        self.season_data = season_data
+        
+        # Build team lookup if EPA data available
+        if epa_df is not None:
+            self.team_epa = epa_df.set_index('team').to_dict('index')
+            self.league_avg_ppg = epa_df['ppg'].mean() if 'ppg' in epa_df.columns else self.LEAGUE_AVG_PPG
+            self.league_avg_off_epa = epa_df['off_epa'].mean()
+            self.league_avg_def_epa = epa_df['def_epa'].mean()
+        else:
+            self.team_epa = {}
+            self.league_avg_ppg = self.LEAGUE_AVG_PPG
+            self.league_avg_off_epa = 0.0
+            self.league_avg_def_epa = 0.0
+    
+    def get_team_stats(self, team: str) -> dict:
+        """Get EPA stats for a team, with fallback to league average."""
+        if team in self.team_epa:
+            return self.team_epa[team]
+        
+        # Fallback to league averages
+        return {
+            'off_epa': self.league_avg_off_epa,
+            'def_epa': self.league_avg_def_epa,
+            'ppg': self.league_avg_ppg,
+            'ppg_allowed': self.league_avg_ppg
+        }
+    
+    def calculate_expected_score(self, offense_team: str, defense_team: str, is_home: bool = False) -> float:
+        """
+        Calculate expected score for a team using EPA adjustments.
+        
+        Formula:
+        Expected = League_Avg + (Team_Off_EPA - Avg_Off_EPA) * Scale
+                   - (Opp_Def_EPA - Avg_Def_EPA) * Scale + Home_Adv
+        
+        Args:
+            offense_team: Team on offense
+            defense_team: Team on defense
+            is_home: Whether offense team is home
+        
+        Returns:
+            Expected points (lambda for Poisson)
+        """
+        off_stats = self.get_team_stats(offense_team)
+        def_stats = self.get_team_stats(defense_team)
+        
+        # Start with team's average PPG (or league average if not available)
+        base_ppg = off_stats.get('ppg', self.league_avg_ppg)
+        
+        # EPA adjustments relative to league average
+        off_epa_adj = (off_stats['off_epa'] - self.league_avg_off_epa) * self.EPA_SCALING
+        
+        # Opponent's defense: higher def_epa means BETTER defense, reduces scoring
+        def_epa_adj = (def_stats['def_epa'] - self.league_avg_def_epa) * self.EPA_SCALING
+        
+        # Expected score: base + offensive boost - defensive reduction
+        expected = base_ppg + off_epa_adj - def_epa_adj
+        
+        # Home field advantage
+        if is_home:
+            expected += self.HOME_ADVANTAGE
+        
+        # Ensure minimum of 7 (a touchdown) - Poisson needs positive lambda
+        return max(7.0, expected)
+    
+    def simulate_game(self, home_team: str, away_team: str) -> Tuple[int, int]:
+        """
+        Simulate a single game using Poisson scoring model.
+        
+        Returns:
+            Tuple of (home_score, away_score)
+        """
+        # Calculate expected scores
+        home_lambda = self.calculate_expected_score(home_team, away_team, is_home=True)
+        away_lambda = self.calculate_expected_score(away_team, home_team, is_home=False)
+        
+        # Sample from Poisson distributions
+        home_score = poisson.rvs(home_lambda)
+        away_score = poisson.rvs(away_lambda)
+        
+        # Handle ties (rare in NFL, ~1% of games)
+        # Simulate OT with 50/50 coinflip if tied
+        if home_score == away_score:
+            # In NFL, ~57% of OT games are won by receiving team
+            # But for simplicity, just give slight home advantage
+            if np.random.random() < 0.52:
+                home_score += 3  # Home team wins with FG
+            else:
+                away_score += 3
+        
+        return int(home_score), int(away_score)
+    
+    def get_win_probability(self, home_team: str, away_team: str, n_sims: int = 1000) -> dict:
+        """
+        Calculate win probability for a matchup via simulation.
+        
+        Returns:
+            Dict with 'home_win', 'away_win', 'home_expected', 'away_expected'
+        """
+        home_lambda = self.calculate_expected_score(home_team, away_team, is_home=True)
+        away_lambda = self.calculate_expected_score(away_team, home_team, is_home=False)
+        
+        home_scores = poisson.rvs(home_lambda, size=n_sims)
+        away_scores = poisson.rvs(away_lambda, size=n_sims)
+        
+        home_wins = np.sum(home_scores > away_scores)
+        ties = np.sum(home_scores == away_scores)
+        
+        # Split ties evenly
+        home_win_pct = (home_wins + ties * 0.5) / n_sims
+        
+        return {
+            'home_win': home_win_pct,
+            'away_win': 1 - home_win_pct,
+            'home_expected': home_lambda,
+            'away_expected': away_lambda
+        }
 
 
 def build_season_data_from_standings(
@@ -125,7 +284,9 @@ def run_advanced_simulation(
     completed_games: List[Game],
     remaining_games: List[Game],
     n_simulations: int = 10000,
-    show_progress: bool = True
+    show_progress: bool = True,
+    use_epa: bool = True,
+    season: int = 2025
 ) -> Dict[str, Dict]:
     """
     Run Monte Carlo simulation with real NFL tiebreakers.
@@ -136,11 +297,25 @@ def run_advanced_simulation(
         remaining_games: Remaining games to simulate
         n_simulations: Number of simulations to run
         show_progress: Whether to show progress bar
+        use_epa: Whether to use EPA-based Poisson model (if available)
+        season: NFL season year (for loading correct EPA data)
     
     Returns:
         Dictionary with simulation results for each team
     """
-    print(f"\n🎲 Running {n_simulations} advanced simulations with NFL tiebreakers...")
+    # Try to load EPA data if requested
+    epa_df = None
+    if use_epa and EPA_AVAILABLE:
+        try:
+            epa_df = load_team_epa(season=season)
+            print("📊 Using EPA-based Poisson scoring model")
+        except Exception as e:
+            print(f"⚠️  EPA data unavailable ({e}), using traditional model")
+            epa_df = None
+    elif use_epa:
+        print("⚠️  EPA loader not available, using traditional model")
+    
+    print(f"\n🎲 Running {n_simulations:,} advanced simulations with NFL tiebreakers...")
     
     # Build initial season data
     base_season = build_season_data_from_standings(standings, completed_games, remaining_games)
@@ -157,8 +332,12 @@ def run_advanced_simulation(
             'total_sims': n_simulations
         }
     
-    # Create simulator
-    simulator = GameSimulator(base_season)
+    # Create simulator - use EPA if available
+    if epa_df is not None:
+        simulator = EPAGameSimulator(epa_df=epa_df, season_data=base_season)
+    else:
+        simulator = GameSimulator(base_season)
+    
     tiebreaker = NFLTiebreaker(base_season)
     
     # Progress bar

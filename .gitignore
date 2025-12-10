@@ -13,6 +13,7 @@ wheels/
 nfl_standings_cache.json
 nfl_games_cache.json
 nfl_schedule_cache.json
+data/
 
 # Results (generated locally)
 results/
@@ -31,3 +32,6 @@ results/
 .idea/
 .vscode/
 *.swp
+
+# Claude
+.claude/
