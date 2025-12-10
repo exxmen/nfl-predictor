@@ -1,0 +1,71 @@
+name: NFL Playoff Predictions
+
+on:
+  schedule:
+    # Run every Tuesday at 10:00 UTC (after Monday Night Football)
+    # Run every Friday at 10:00 UTC (after Thursday Night Football)
+    - cron: '0 10 * * 2,5'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  GIST_ID: ${{ secrets.GIST_ID }}
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run predictions
+        run: |
+          uv run python scheduled_run.py --simulations 100000
+          echo "Results generated:"
+          ls -la results/
+
+      - name: Find latest markdown file
+        id: files
+        run: |
+          MD_FILE=$(ls -t results/*.md | head -1)
+          echo "md_file=$MD_FILE" >> $GITHUB_OUTPUT
+          echo "Found: $MD_FILE"
+
+      - name: Update Gist with results
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          # Read the markdown content
+          CONTENT=$(cat "${{ steps.files.outputs.md_file }}")
+          
+          # Escape for JSON
+          ESCAPED_CONTENT=$(echo "$CONTENT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
+          
+          # Update the gist
+          curl -L \
+            -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/gists/${{ env.GIST_ID }}" \
+            -d "{\"files\":{\"NFL_Playoff_Predictions.md\":{\"content\":$ESCAPED_CONTENT}}}"
+          
+          echo "✅ Gist updated successfully!"
+
+      - name: Upload results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfl-predictions-${{ github.run_number }}
+          path: results/
+          retention-days: 90
