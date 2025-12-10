@@ -1,0 +1,51 @@
+# NFL Playoff Predictor - Cron Setup for Hetzner VPS
+#
+# Run at 8:00 AM PHT (UTC+8) on Tuesday, Wednesday, Thursday
+# PHT 8:00 AM = UTC 00:00 (midnight)
+#
+# This is before Thursday Night Football starts (Friday 9:15 AM PHT)
+
+# ============================================================
+# SETUP INSTRUCTIONS (from GitHub)
+# ============================================================
+#
+# 1. SSH into your VPS:
+#    ssh user@your-vps
+#
+# 2. Install uv:
+#    curl -LsSf https://astral.sh/uv/install.sh | sh
+#    source ~/.bashrc
+#
+# 3. Clone the repo:
+#    git clone https://github.com/YOUR_USERNAME/nfl-predictor.git
+#    cd nfl-predictor
+#
+# 4. Install dependencies:
+#    uv sync
+#
+# 5. Test run:
+#    uv run python scheduled_run.py --force -n 1000
+#
+# 6. Add cron job:
+#    crontab -e
+#    # Paste the cron entry below (adjust path)
+#
+# ============================================================
+# CRON ENTRY (UTC timezone - most VPS default)
+# ============================================================
+# PHT 8:00 AM = UTC 00:00 (midnight)
+
+0 0 * * 2,3,4 cd ~/nfl-predictor && ~/.local/bin/uv run python scheduled_run.py >> results/cron.log 2>&1
+
+# ============================================================
+# TO UPDATE FROM GITHUB
+# ============================================================
+# cd ~/nfl-predictor && git pull
+
+# ============================================================
+# USEFUL COMMANDS
+# ============================================================
+# Check cron status: systemctl status cron
+# View cron logs: grep CRON /var/log/syslog
+# Check timezone: timedatectl
+# Manual run: uv run python scheduled_run.py --force -n 100000

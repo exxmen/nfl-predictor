@@ -1,0 +1,33 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Cache files (regenerated on run)
+nfl_standings_cache.json
+nfl_games_cache.json
+nfl_schedule_cache.json
+
+# Results (generated locally)
+results/
+
+# Logs
+*.log
+
+# uv lock file (regenerated from pyproject.toml)
+# Uncomment if you want to commit the lock file
+# uv.lock
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
