@@ -17,7 +17,8 @@ PHT (UTC+8) timing considerations:
 import os
 import sys
 import json
-from datetime import datetime, date
+import time
+from datetime import datetime, date, timezone
 
 # Add project to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -205,9 +206,11 @@ def format_results_markdown(results: dict, n_simulations: int) -> str:
     # Header
     lines.append(f"# 🏈 NFL Playoff Probabilities - Week {current_week}")
     lines.append("")
-    lines.append(f"**Generated:** {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
+    lines.append(f"**Generated:** {datetime.now(timezone.utc).strftime('%B %d, %Y at %I:%M %p')} UTC")
     lines.append(f"**Simulations:** {n_simulations:,}")
     lines.append(f"**Games:** {results['completed_games']} completed, {results['remaining_games']} remaining")
+    lines.append("")
+    lines.append("*Probabilities calculated using EPA-based Poisson scoring model with Monte Carlo simulation and full NFL tiebreaker rules.*")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -303,10 +306,6 @@ def format_results_markdown(results: dict, n_simulations: int) -> str:
         
         lines.append("")
         lines.append("---")
-        lines.append("")
-    
-    # Footer
-    lines.append("*Probabilities based on Monte Carlo simulation with full NFL tiebreaker rules.*")
     
     return '\n'.join(lines)
 
