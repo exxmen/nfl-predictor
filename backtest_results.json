@@ -1,0 +1,21 @@
+{
+  "generated": "2025-12-11T01:55:09.350307",
+  "results": [
+    {
+      "season": 2024,
+      "week": 14,
+      "brier_score": 0.1961,
+      "win_accuracy": 0.7013,
+      "playoff_accuracy": 1.0,
+      "n_games": 77
+    },
+    {
+      "season": 2024,
+      "week": 14,
+      "brier_score": 0.2394,
+      "win_accuracy": 0.6104,
+      "playoff_accuracy": 1.0,
+      "n_games": 77
+    }
+  ]
+}
