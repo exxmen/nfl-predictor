@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 import re
 
 # Cache directory
-CACHE_DIR = Path("data")
+CACHE_DIR = Path("cache")
 
 def get_cache_files(season: int) -> tuple:
     """Get cache file paths for a specific season."""

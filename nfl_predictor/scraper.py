@@ -467,7 +467,7 @@ async def scrape_pfr_schedule_simple(season: int = 2025) -> Tuple[List[Game], Li
 # STANDINGS SCRAPER (HTTP-based)
 # ==========================================
 
-STANDINGS_CACHE_FILE = "nfl_standings_cache.json"
+STANDINGS_CACHE_FILE = "cache/nfl_standings_cache.json"
 
 
 def load_standings_cache():
@@ -514,6 +514,8 @@ def save_standings_cache(teams_data):
             'cached_week': current_week,
             'standings': teams_data
         }
+        import os
+        os.makedirs(os.path.dirname(STANDINGS_CACHE_FILE), exist_ok=True)
         with open(STANDINGS_CACHE_FILE, 'w') as f:
             json.dump(data, f, indent=2)
     except Exception as e:

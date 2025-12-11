@@ -55,9 +55,9 @@ def should_run_today() -> tuple[bool, str]:
 def clear_caches():
     """Clear all caches to force fresh data fetch"""
     cache_files = [
-        "nfl_standings_cache.json",
-        "nfl_games_cache.json", 
-        "nfl_schedule_cache.json"
+        "cache/nfl_standings_cache.json",
+        "cache/nfl_games_cache.json", 
+        "cache/nfl_schedule_cache.json"
     ]
     
     for cache_file in cache_files:

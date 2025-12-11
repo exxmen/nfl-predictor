@@ -848,8 +848,8 @@ def run_single_simulation(base_season: SeasonData) -> Dict[str, List[str]]:
 # CACHING
 # ==========================================
 
-GAMES_CACHE_FILE = "nfl_games_cache.json"
-SCHEDULE_CACHE_FILE = "nfl_schedule_cache.json"
+GAMES_CACHE_FILE = "cache/nfl_games_cache.json"
+SCHEDULE_CACHE_FILE = "cache/nfl_schedule_cache.json"
 
 # NFL 2025 Regular Season Week Start Dates (Thursday of each week)
 # Games typically start Thursday evening and run through Monday night
@@ -953,6 +953,8 @@ def save_games_cache(games: List[Game]):
             for g in games
         ]
     }
+    import os
+    os.makedirs(os.path.dirname(GAMES_CACHE_FILE), exist_ok=True)
     with open(GAMES_CACHE_FILE, 'w') as f:
         json.dump(data, f, indent=2)
     print(f"💾 Saved {len(games)} games to {GAMES_CACHE_FILE}")
@@ -1016,6 +1018,8 @@ def save_schedule_cache(games: List[Game]):
             for g in games
         ]
     }
+    import os
+    os.makedirs(os.path.dirname(SCHEDULE_CACHE_FILE), exist_ok=True)
     with open(SCHEDULE_CACHE_FILE, 'w') as f:
         json.dump(data, f, indent=2)
     print(f"💾 Saved {len(games)} scheduled games to {SCHEDULE_CACHE_FILE}")

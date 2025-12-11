@@ -527,8 +527,12 @@ class NFLBacktester:
         
         return epa_result, trad_result
     
-    def save_results(self, filepath: str = "backtest_results.json"):
+    def save_results(self, filepath: str = "results/backtest_results.json"):
         """Save all backtest results to JSON."""
+        # Ensure directory exists
+        import os
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
         data = {
             'generated': datetime.now().isoformat(),
             'results': [r.to_dict() for r in self.results]

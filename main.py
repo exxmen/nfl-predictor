@@ -52,7 +52,7 @@ args = parse_arguments()
 # ==========================================
 # CACHING LOGIC (legacy - now handled in pfr_scraper)
 # ==========================================
-CACHE_FILE = "nfl_standings_cache.json"
+CACHE_FILE = "cache/nfl_standings_cache.json"
 
 def load_cached_standings():
     """Load standings from cache if valid (less than 24 hours old)"""

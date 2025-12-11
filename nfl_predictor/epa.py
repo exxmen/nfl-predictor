@@ -14,7 +14,7 @@ import json
 
 
 # Cache directory
-CACHE_DIR = Path("data")
+CACHE_DIR = Path("cache")
 
 # Momentum calculation constants
 MIN_EPA_STD_DEV = 0.01  # Minimum std dev threshold (prevents division by near-zero)
