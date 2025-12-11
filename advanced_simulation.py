@@ -30,6 +30,93 @@ except ImportError:
     EPA_AVAILABLE = False
 
 
+def calculate_game_momentum(completed_games: List[Game], n_recent: int = 4) -> Dict[str, Dict[str, float]]:
+    """
+    Calculate team momentum from completed game margins.
+    
+    This provides TRUE current-season momentum using actual game results,
+    rather than relying on EPA data which may not be available for current season.
+    
+    Momentum is calculated as z-score: (recent_margin - season_margin) / std_dev
+    
+    Args:
+        completed_games: List of completed Game objects
+        n_recent: Number of recent games to use for "hot/cold" detection (default: 4)
+    
+    Returns:
+        Dict of team -> {'off_momentum': float, 'def_momentum': float, 'total_momentum': float}
+    """
+    from collections import defaultdict
+    
+    # Build per-team game history
+    team_games: Dict[str, List[Tuple[int, int, int]]] = defaultdict(list)  # team -> [(week, points_for, points_against)]
+    
+    for game in completed_games:
+        if not game.completed or game.home_score is None or game.away_score is None:
+            continue
+        
+        # Home team's perspective
+        team_games[game.home_team].append((game.week, game.home_score, game.away_score))
+        # Away team's perspective
+        team_games[game.away_team].append((game.week, game.away_score, game.home_score))
+    
+    momentum_data = {}
+    
+    for team, games in team_games.items():
+        if len(games) < 3:  # Need at least 3 games for meaningful momentum
+            continue
+        
+        # Sort by week (most recent last)
+        games.sort(key=lambda x: x[0])
+        
+        # Calculate season averages
+        all_margins = [pf - pa for week, pf, pa in games]
+        all_pf = [pf for week, pf, pa in games]
+        all_pa = [pa for week, pf, pa in games]
+        
+        season_margin = sum(all_margins) / len(all_margins)
+        season_pf = sum(all_pf) / len(all_pf)
+        season_pa = sum(all_pa) / len(all_pa)
+        
+        # Calculate std dev for z-score (use margin std dev, min 7 to avoid over-sensitivity)
+        margin_std = max(7.0, np.std(all_margins)) if len(all_margins) > 1 else 7.0
+        
+        # Get recent games (last n_recent)
+        recent_games = games[-n_recent:]
+        recent_margins = [pf - pa for week, pf, pa in recent_games]
+        recent_pf = [pf for week, pf, pa in recent_games]
+        recent_pa = [pa for week, pf, pa in recent_games]
+        
+        recent_margin = sum(recent_margins) / len(recent_margins)
+        recent_pf_avg = sum(recent_pf) / len(recent_pf)
+        recent_pa_avg = sum(recent_pa) / len(recent_pa)
+        
+        # Calculate momentum as z-score
+        # Positive = team is outperforming their season average
+        total_momentum = (recent_margin - season_margin) / margin_std
+        
+        # Offensive momentum: scoring more recently than usual
+        off_momentum = (recent_pf_avg - season_pf) / max(7.0, np.std(all_pf) if len(all_pf) > 1 else 7.0)
+        
+        # Defensive momentum: allowing fewer points recently than usual
+        def_momentum = (season_pa - recent_pa_avg) / max(7.0, np.std(all_pa) if len(all_pa) > 1 else 7.0)
+        
+        # Clip to reasonable range (-3 to +3 standard deviations)
+        total_momentum = max(-3.0, min(3.0, total_momentum))
+        off_momentum = max(-3.0, min(3.0, off_momentum))
+        def_momentum = max(-3.0, min(3.0, def_momentum))
+        
+        momentum_data[team] = {
+            'off_momentum': round(off_momentum, 3),
+            'def_momentum': round(def_momentum, 3),
+            'total_momentum': round(total_momentum, 3),
+            'recent_games': len(recent_games),
+            'season_games': len(games)
+        }
+    
+    return momentum_data
+
+
 class EPAGameSimulator:
     """
     Enhanced game simulator using EPA and Poisson scoring model.
@@ -51,7 +138,12 @@ class EPAGameSimulator:
     # ~0.1 EPA/play difference ≈ 3-4 points per game
     EPA_SCALING = 35.0  # Multiply EPA by this to get point adjustment
     
-    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None, injury_impacts: Optional[Dict[str, Dict[str, float]]] = None):
+    # Momentum weight: how much recent form affects expected score
+    # Value of 0.10 means momentum can adjust score by up to ±2 points
+    MOMENTUM_WEIGHT = 0.10
+    MOMENTUM_POINTS_PER_SIGMA = 2.0  # Points adjustment per standard deviation
+    
+    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None, injury_impacts: Optional[Dict[str, Dict[str, float]]] = None, use_momentum: bool = True, game_momentum: Optional[Dict[str, Dict[str, float]]] = None, prefer_game_momentum: bool = False):
         """
         Initialize EPA-based simulator.
 
@@ -59,10 +151,16 @@ class EPAGameSimulator:
             epa_df: DataFrame with team EPA stats (from epa_loader.py)
             season_data: Traditional SeasonData for fallback
             injury_impacts: Dict of team -> injury impact dict (from player_impact.py)
+            use_momentum: Whether to apply momentum adjustments (default: True)
+            game_momentum: Dict of team -> momentum from completed games
+            prefer_game_momentum: If True, prefer game momentum over EPA momentum (for current season)
         """
         self.epa_df = epa_df
         self.season_data = season_data
         self.injury_impacts = injury_impacts or {}
+        self.use_momentum = use_momentum
+        self.game_momentum = game_momentum or {}
+        self.prefer_game_momentum = prefer_game_momentum  # True for current season
 
         # Build team lookup if EPA data available
         if epa_df is not None:
@@ -70,11 +168,17 @@ class EPAGameSimulator:
             self.league_avg_ppg = epa_df['ppg'].mean() if 'ppg' in epa_df.columns else self.LEAGUE_AVG_PPG
             self.league_avg_off_epa = epa_df['off_epa'].mean()
             self.league_avg_def_epa = epa_df['def_epa'].mean()
+            # Check if momentum data is available in EPA (from nflverse)
+            self.has_epa_momentum = 'off_momentum' in epa_df.columns and 'def_momentum' in epa_df.columns
         else:
             self.team_epa = {}
             self.league_avg_ppg = self.LEAGUE_AVG_PPG
             self.league_avg_off_epa = 0.0
             self.league_avg_def_epa = 0.0
+            self.has_epa_momentum = False
+        
+        # Determine which momentum source to use
+        self.has_momentum = bool(self.game_momentum) if prefer_game_momentum else (self.has_epa_momentum or bool(self.game_momentum))
     
     def get_team_stats(self, team: str) -> dict:
         """Get EPA stats for a team, with fallback to league average."""
@@ -86,8 +190,51 @@ class EPAGameSimulator:
             'off_epa': self.league_avg_off_epa,
             'def_epa': self.league_avg_def_epa,
             'ppg': self.league_avg_ppg,
-            'ppg_allowed': self.league_avg_ppg
+            'ppg_allowed': self.league_avg_ppg,
+            'off_momentum': 0.0,
+            'def_momentum': 0.0
         }
+    
+    def get_momentum(self, team: str, side: str) -> float:
+        """
+        Get momentum score for a team (offensive or defensive).
+        
+        For current season: prefers game-based momentum (from actual completed games)
+        For historical: uses EPA-based momentum (from that year's play-by-play)
+        
+        Args:
+            team: Team abbreviation
+            side: 'offense' or 'defense'
+        
+        Returns:
+            Momentum z-score (positive = hot, negative = cold)
+        """
+        if not self.use_momentum:
+            return 0.0
+        
+        # For current season, prefer game-based momentum (from actual 2025 games)
+        if self.prefer_game_momentum and self.game_momentum and team in self.game_momentum:
+            if side == 'offense':
+                return self.game_momentum[team].get('off_momentum', 0.0)
+            else:
+                return self.game_momentum[team].get('def_momentum', 0.0)
+        
+        # For historical (backtest), use EPA-based momentum
+        if self.has_epa_momentum:
+            stats = self.team_epa.get(team, {})
+            if side == 'offense':
+                return stats.get('off_momentum', 0.0)
+            else:
+                return stats.get('def_momentum', 0.0)
+        
+        # Last resort fallback to game momentum
+        if self.game_momentum and team in self.game_momentum:
+            if side == 'offense':
+                return self.game_momentum[team].get('off_momentum', 0.0)
+            else:
+                return self.game_momentum[team].get('def_momentum', 0.0)
+        
+        return 0.0
     
     def calculate_expected_score(self, offense_team: str, defense_team: str, is_home: bool = False) -> float:
         """
@@ -132,6 +279,18 @@ class EPAGameSimulator:
             def_injuries = self.injury_impacts.get(defense_team, {})
             def_impact = def_injuries.get('defensive_impact', 0.0)
             expected *= (1 + def_impact * 0.5)  # Half effect for opponent injuries
+        
+        # Apply momentum adjustments (hot/cold streaks)
+        if self.has_momentum and self.use_momentum:
+            # Hot offense scores more, cold offense scores less
+            off_momentum = self.get_momentum(offense_team, 'offense')
+            # Hot defense reduces scoring, cold defense allows more
+            def_momentum = self.get_momentum(defense_team, 'defense')
+            
+            # Apply momentum adjustment: ~2 points per standard deviation
+            momentum_adj = off_momentum * self.MOMENTUM_POINTS_PER_SIGMA * self.MOMENTUM_WEIGHT
+            momentum_adj -= def_momentum * self.MOMENTUM_POINTS_PER_SIGMA * self.MOMENTUM_WEIGHT
+            expected += momentum_adj
 
         # Home field advantage
         if is_home:
@@ -302,7 +461,8 @@ def run_advanced_simulation(
     show_progress: bool = True,
     use_epa: bool = True,
     season: int = 2025,
-    injury_impacts: Optional[Dict[str, Dict[str, float]]] = None
+    injury_impacts: Optional[Dict[str, Dict[str, float]]] = None,
+    use_momentum: bool = True
 ) -> Dict[str, Dict]:
     """
     Run Monte Carlo simulation with real NFL tiebreakers.
@@ -315,6 +475,8 @@ def run_advanced_simulation(
         show_progress: Whether to show progress bar
         use_epa: Whether to use EPA-based Poisson model (if available)
         season: NFL season year (for loading correct EPA data)
+        injury_impacts: Dict of team -> injury impact from player_impact.py
+        use_momentum: Whether to apply momentum adjustments (default: True)
     
     Returns:
         Dictionary with simulation results for each team
@@ -336,6 +498,22 @@ def run_advanced_simulation(
     # Build initial season data
     base_season = build_season_data_from_standings(standings, completed_games, remaining_games)
     
+    # Determine if this is current season or historical (backtest)
+    from datetime import datetime
+    current_year = datetime.now().year
+    is_current_season = (season >= current_year)
+    
+    # Calculate game-based momentum from completed games
+    # For current season: use game-based momentum (most accurate for live predictions)
+    # For historical: use EPA-based momentum (from that year's play-by-play)
+    game_momentum = None
+    prefer_game_momentum = is_current_season  # Prefer game-based for current season
+    
+    if use_momentum and is_current_season:
+        game_momentum = calculate_game_momentum(completed_games, n_recent=4)
+        if game_momentum:
+            print(f"📈 Calculated momentum from {len(game_momentum)} teams' recent games")
+    
     # Initialize results tracking
     results: Dict[str, Dict] = {}
     for team_name in base_season.teams.keys():
@@ -348,9 +526,21 @@ def run_advanced_simulation(
             'total_sims': n_simulations
         }
     
-    # Create simulator - use EPA if available
+    # Create simulator - use EPA if available, with game-based momentum for current season
     if epa_df is not None:
-        simulator = EPAGameSimulator(epa_df=epa_df, season_data=base_season, injury_impacts=injury_impacts)
+        simulator = EPAGameSimulator(
+            epa_df=epa_df, 
+            season_data=base_season, 
+            injury_impacts=injury_impacts, 
+            use_momentum=use_momentum,
+            game_momentum=game_momentum,
+            prefer_game_momentum=prefer_game_momentum
+        )
+        if simulator.has_momentum and use_momentum:
+            if is_current_season and game_momentum:
+                print("📈 Using game-based momentum (from 2025 score margins)")
+            elif simulator.has_epa_momentum:
+                print(f"📈 Using EPA-based momentum (from {season} play-by-play)")
     else:
         simulator = GameSimulator(base_season)
     
@@ -579,7 +769,7 @@ def print_simulation_results(results: Dict[str, Dict], teams_data: List[Dict], n
         
         sorted_teams = sorted(
             conf_results.items(),
-            key=lambda x: x[1]['playoff_count'],
+            key=lambda x: x[1]['seed_counts'][1],  # Sort by 1st seed probability
             reverse=True
         )[:10]
         

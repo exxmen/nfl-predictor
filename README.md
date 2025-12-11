@@ -1,6 +1,6 @@
 # NFL Playoff Predictor
 
-Monte Carlo simulation for NFL playoff probabilities using EPA analytics and full tiebreaker support.
+Monte Carlo simulation for NFL playoff probabilities using EPA analytics, momentum tracking, injury adjustments, and full tiebreaker support.
 
 ## 📊 Latest Predictions
 
@@ -11,10 +11,11 @@ Updated automatically via GitHub Actions every Tuesday and Friday during the NFL
 ## Features
 
 - 📈 **EPA-Based Scoring Model**: Uses Expected Points Added (EPA) from play-by-play data with Poisson distribution for realistic score simulation
+- 🔥 **Momentum/Recent Form**: Adjusts predictions based on team's last 4 games vs season average (hot streaks matter!)
 - 🏥 **Injury Impact Analysis**: Scrapes ESPN injuries, matches to snap counts for starter detection, adjusts team strength based on player availability
 - 🏈 **Real NFL Tiebreaker Rules**: Implements all 12 division and 11 wild card tiebreaker steps
 - 📊 **Monte Carlo Simulation**: 100,000 simulations for accurate probability estimates
-- ✅ **Validated Accuracy**: 74% win prediction accuracy, 0.19 Brier score (backtested on 2024 season with injuries)
+- ✅ **Validated Accuracy**: 74% win prediction accuracy, 0.19 Brier score (backtested on 2024 season)
 - 🚀 **Fast HTTP Scraping**: Gets standings and game data from Pro-Football-Reference (no browser needed)
 - 📅 **Smart Caching**: Week-based cache invalidation (refreshes when new NFL week starts)
 - ⚙️ **GitHub Actions**: Automated runs update a public Gist with latest predictions
@@ -59,10 +60,11 @@ uv run python scheduled_run.py --simulations 100000
 1. **Scrapes current standings** from Pro-Football-Reference
 2. **Fetches completed games** and remaining schedule
 3. **Loads injury data** from ESPN (current season) or nfl_data_py (historical)
-4. **Calculates injury impacts** using snap count data to identify starters
-5. **Simulates remaining games** using EPA-adjusted scoring with injury impacts
-6. **Applies full NFL tiebreakers** to determine playoff seeds
-7. **Aggregates results** across 100,000 simulations
+4. **Calculates momentum** by comparing last 4 games EPA to season average
+5. **Calculates injury impacts** using snap count data to identify starters
+6. **Simulates remaining games** using EPA + momentum + injury adjustments
+7. **Applies full NFL tiebreakers** to determine playoff seeds
+8. **Aggregates results** across 100,000 simulations
 
 ## GitHub Actions
 
