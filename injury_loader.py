@@ -67,7 +67,7 @@ def is_cache_valid(season: int) -> bool:
 
         # Cache is valid if we're still in the same week
         return cached_week >= current_week
-    except:
+    except Exception:
         return False
 
 def scrape_espn_injuries(season: int = 2025) -> pd.DataFrame:
@@ -154,7 +154,7 @@ def scrape_espn_injuries(season: int = 2025) -> pd.DataFrame:
 
                 full_name = player_link.get_text().strip()
                 position = cols[1].get_text().strip() if len(cols) > 1 else 'UNK'
-                return_date = cols[2].get_text().strip() if len(cols) > 2 else ''
+                # return_date = cols[2].get_text().strip() if len(cols) > 2 else ''  # Not currently used
                 status = cols[3].get_text().strip() if len(cols) > 3 else 'Questionable'
                 comment = cols[4].get_text().strip() if len(cols) > 4 else ''
 
