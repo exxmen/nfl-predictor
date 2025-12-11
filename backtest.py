@@ -23,6 +23,14 @@ from pathlib import Path
 from epa_loader import load_team_epa
 from nfl_tiebreakers import Game, TEAM_TO_CONFERENCE, TEAM_TO_DIVISION
 
+# Try to import injury modules (optional enhancement for current season)
+try:
+    from injury_loader import load_injury_data, load_snap_counts
+    from player_impact import get_all_team_impacts
+    INJURIES_AVAILABLE = True
+except ImportError:
+    INJURIES_AVAILABLE = False
+
 
 # Team abbreviation to conference/division mapping
 # nfl_data_py uses abbreviations, our tiebreakers use full names
@@ -285,6 +293,18 @@ class NFLBacktester:
             print(f"  ⚠️  No remaining games from week {from_week}")
             return {}
         
+        # Load injury data for current season (not available for historical)
+        injury_impacts = None
+        if INJURIES_AVAILABLE:
+            try:
+                injuries_df = load_injury_data(season=season)
+                snap_counts_df = load_snap_counts(season=season)
+                injury_impacts = get_all_team_impacts(injuries_df, snap_counts_df, from_week)
+                if injury_impacts:
+                    print(f"  📋 Loaded injury impacts for {len(injury_impacts)} teams")
+            except Exception as e:
+                print(f"  ⚠️ Injury data unavailable: {e}")
+
         # Run simulation with correct season for EPA data
         results = run_advanced_simulation(
             standings=standings_list,
@@ -293,7 +313,8 @@ class NFLBacktester:
             n_simulations=n_simulations,
             show_progress=False,
             use_epa=self.use_epa,
-            season=season
+            season=season,
+            injury_impacts=injury_impacts
         )
         
         return results
