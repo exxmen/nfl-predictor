@@ -89,20 +89,38 @@ def run_simulation(n_simulations: int = 100000) -> dict:
     
     print(f"📊 Data: {len(teams_data)} teams, {len(completed_games)} completed games, {len(remaining_games)} remaining")
     
+    # Load injury data
+    injury_impacts = None
+    try:
+        from injury_loader import load_injury_data, load_snap_counts, get_current_nfl_week
+        from player_impact import get_all_team_impacts
+        
+        injuries_df = load_injury_data(2025)
+        snap_counts_df = load_snap_counts(2025)
+        current_week = get_current_nfl_week()
+        injury_impacts = get_all_team_impacts(injuries_df, snap_counts_df, current_week)
+        
+        if injury_impacts:
+            print(f"🏥 Loaded injury impacts for {len(injury_impacts)} teams")
+    except Exception as e:
+        print(f"⚠️ Injury data unavailable: {e}")
+    
     # Run simulation
     results = run_advanced_simulation(
         standings=teams_data,
         completed_games=completed_games,
         remaining_games=remaining_games,
         n_simulations=n_simulations,
-        show_progress=True
+        show_progress=True,
+        injury_impacts=injury_impacts
     )
     
     return {
         'teams_data': teams_data,
         'results': results,
         'completed_games': len(completed_games),
-        'remaining_games': len(remaining_games)
+        'remaining_games': len(remaining_games),
+        'injury_impacts': injury_impacts
     }
 
 
@@ -206,11 +224,20 @@ def format_results_markdown(results: dict, n_simulations: int) -> str:
     # Header
     lines.append(f"# 🏈 NFL Playoff Probabilities - Week {current_week}")
     lines.append("")
-    lines.append(f"**Generated:** {datetime.now(timezone.utc).strftime('%B %d, %Y at %I:%M %p')} UTC")
-    lines.append(f"**Simulations:** {n_simulations:,}")
-    lines.append(f"**Games:** {results['completed_games']} completed, {results['remaining_games']} remaining")
+    
+    # Metadata as bullet list for proper line breaks
+    lines.append(f"- **Generated:** {datetime.now(timezone.utc).strftime('%B %d, %Y at %I:%M %p')} UTC")
+    lines.append(f"- **Simulations:** {n_simulations:,}")
+    lines.append(f"- **Games:** {results['completed_games']} completed, {results['remaining_games']} remaining")
+    
+    # Add injury status
+    if results.get('injury_impacts'):
+        lines.append(f"- **Injuries:** ✅ Accounted for ({len(results['injury_impacts'])} teams)")
+    else:
+        lines.append("- **Injuries:** ⚠️ Not available")
+    
     lines.append("")
-    lines.append("*Probabilities calculated using EPA-based Poisson scoring model with Monte Carlo simulation and full NFL tiebreaker rules.*")
+    lines.append("*Probabilities calculated using EPA-based Poisson scoring model with Monte Carlo simulation, injury adjustments, and full NFL tiebreaker rules.*")
     lines.append("")
     lines.append("---")
     lines.append("")
