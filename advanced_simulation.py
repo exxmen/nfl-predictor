@@ -51,17 +51,19 @@ class EPAGameSimulator:
     # ~0.1 EPA/play difference ≈ 3-4 points per game
     EPA_SCALING = 35.0  # Multiply EPA by this to get point adjustment
     
-    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None):
+    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None, injury_impacts: Optional[Dict[str, Dict[str, float]]] = None):
         """
         Initialize EPA-based simulator.
-        
+
         Args:
             epa_df: DataFrame with team EPA stats (from epa_loader.py)
             season_data: Traditional SeasonData for fallback
+            injury_impacts: Dict of team -> injury impact dict (from player_impact.py)
         """
         self.epa_df = epa_df
         self.season_data = season_data
-        
+        self.injury_impacts = injury_impacts or {}
+
         # Build team lookup if EPA data available
         if epa_df is not None:
             self.team_epa = epa_df.set_index('team').to_dict('index')
@@ -89,39 +91,52 @@ class EPAGameSimulator:
     
     def calculate_expected_score(self, offense_team: str, defense_team: str, is_home: bool = False) -> float:
         """
-        Calculate expected score for a team using EPA adjustments.
-        
+        Calculate expected score for a team using EPA adjustments and injury impacts.
+
         Formula:
         Expected = League_Avg + (Team_Off_EPA - Avg_Off_EPA) * Scale
                    - (Opp_Def_EPA - Avg_Def_EPA) * Scale + Home_Adv
-        
+                   + Injury_Adjustments
+
         Args:
             offense_team: Team on offense
             defense_team: Team on defense
             is_home: Whether offense team is home
-        
+
         Returns:
             Expected points (lambda for Poisson)
         """
         off_stats = self.get_team_stats(offense_team)
         def_stats = self.get_team_stats(defense_team)
-        
+
         # Start with team's average PPG (or league average if not available)
         base_ppg = off_stats.get('ppg', self.league_avg_ppg)
-        
+
         # EPA adjustments relative to league average
         off_epa_adj = (off_stats['off_epa'] - self.league_avg_off_epa) * self.EPA_SCALING
-        
+
         # Opponent's defense: higher def_epa means BETTER defense, reduces scoring
         def_epa_adj = (def_stats['def_epa'] - self.league_avg_def_epa) * self.EPA_SCALING
-        
+
         # Expected score: base + offensive boost - defensive reduction
         expected = base_ppg + off_epa_adj - def_epa_adj
-        
+
+        # Apply injury adjustments
+        if self.injury_impacts:
+            # Offensive team's injuries reduce their expected score
+            off_injuries = self.injury_impacts.get(offense_team, {})
+            off_impact = off_injuries.get('offensive_impact', 0.0)
+            expected *= (1 - off_impact)
+
+            # Defensive team's injuries increase offensive team's expected score
+            def_injuries = self.injury_impacts.get(defense_team, {})
+            def_impact = def_injuries.get('defensive_impact', 0.0)
+            expected *= (1 + def_impact * 0.5)  # Half effect for opponent injuries
+
         # Home field advantage
         if is_home:
             expected += self.HOME_ADVANTAGE
-        
+
         # Ensure minimum of 7 (a touchdown) - Poisson needs positive lambda
         return max(7.0, expected)
     
@@ -286,7 +301,8 @@ def run_advanced_simulation(
     n_simulations: int = 10000,
     show_progress: bool = True,
     use_epa: bool = True,
-    season: int = 2025
+    season: int = 2025,
+    injury_impacts: Optional[Dict[str, Dict[str, float]]] = None
 ) -> Dict[str, Dict]:
     """
     Run Monte Carlo simulation with real NFL tiebreakers.
@@ -334,7 +350,7 @@ def run_advanced_simulation(
     
     # Create simulator - use EPA if available
     if epa_df is not None:
-        simulator = EPAGameSimulator(epa_df=epa_df, season_data=base_season)
+        simulator = EPAGameSimulator(epa_df=epa_df, season_data=base_season, injury_impacts=injury_impacts)
     else:
         simulator = GameSimulator(base_season)
     
