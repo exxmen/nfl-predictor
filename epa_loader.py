@@ -16,6 +16,11 @@ import json
 # Cache directory
 CACHE_DIR = Path("data")
 
+# Momentum calculation constants
+MIN_EPA_STD_DEV = 0.01  # Minimum std dev threshold (prevents division by near-zero)
+DEFAULT_EPA_STD_DEV = 0.1  # Default std dev when data is insufficient
+MAX_MOMENTUM_ZSCORE = 3.0  # Clip momentum z-scores to prevent extreme outliers
+
 def get_cache_files(season: int) -> tuple:
     """Get cache file paths for a specific season."""
     return (
@@ -68,6 +73,120 @@ def is_cache_valid(season: int) -> bool:
         return cached_week >= current_week
     except:
         return False
+
+
+def calculate_team_momentum(pbp: pd.DataFrame, n_recent_games: int = 4) -> pd.DataFrame:
+    """
+    Calculate team momentum based on recent performance vs season average.
+    
+    Momentum is a z-score indicating how much better/worse a team is performing
+    recently compared to their season baseline.
+    
+    Args:
+        pbp: Play-by-play DataFrame
+        n_recent_games: Number of recent games to use for "recent form" (default: 4)
+    
+    Returns:
+        DataFrame with columns:
+        - team: Team abbreviation
+        - recent_off_epa: Offensive EPA over last N games
+        - recent_def_epa: Defensive EPA over last N games
+        - off_momentum: Z-score for offensive momentum
+        - def_momentum: Z-score for defensive momentum
+        - total_momentum: Combined momentum score
+    """
+    # Filter to real plays
+    real_plays = pbp[
+        (pbp['play_type'].isin(['pass', 'run', 'qb_kneel', 'qb_spike'])) &
+        (pbp['epa'].notna()) &
+        (pbp['week'].notna())
+    ].copy()
+    
+    if real_plays.empty:
+        return pd.DataFrame()
+    
+    # Get unique games per team to determine recent games
+    games = pbp[pbp['game_id'].notna()][['game_id', 'week', 'home_team', 'away_team']].drop_duplicates()
+    
+    # Build team-game mapping
+    team_games = []
+    for _, game in games.iterrows():
+        team_games.append({'team': game['home_team'], 'game_id': game['game_id'], 'week': game['week']})
+        team_games.append({'team': game['away_team'], 'game_id': game['game_id'], 'week': game['week']})
+    
+    team_games_df = pd.DataFrame(team_games).drop_duplicates()
+    
+    # For each team, identify their most recent N games
+    recent_game_ids = {}
+    for team in team_games_df['team'].unique():
+        if pd.isna(team) or team == '':
+            continue
+        team_schedule = team_games_df[team_games_df['team'] == team].sort_values('week', ascending=False)
+        recent_game_ids[team] = set(team_schedule.head(n_recent_games)['game_id'].tolist())
+    
+    # Calculate season-wide EPA per team (offense)
+    season_off_epa = real_plays.groupby('posteam')['epa'].agg(['mean', 'std']).rename(
+        columns={'mean': 'season_off_epa', 'std': 'season_off_std'}
+    )
+    
+    # Calculate season-wide EPA per team (defense) - flip sign
+    season_def_epa = real_plays.groupby('defteam')['epa'].agg(['mean', 'std'])
+    season_def_epa['season_def_epa'] = -season_def_epa['mean']
+    season_def_epa['season_def_std'] = season_def_epa['std']
+    season_def_epa = season_def_epa[['season_def_epa', 'season_def_std']]
+    
+    # Calculate recent EPA for each team
+    momentum_data = []
+    
+    for team, game_ids in recent_game_ids.items():
+        if not game_ids:
+            continue
+        
+        # Recent offensive plays
+        recent_off_plays = real_plays[
+            (real_plays['posteam'] == team) & 
+            (real_plays['game_id'].isin(game_ids))
+        ]
+        
+        # Recent defensive plays
+        recent_def_plays = real_plays[
+            (real_plays['defteam'] == team) & 
+            (real_plays['game_id'].isin(game_ids))
+        ]
+        
+        if recent_off_plays.empty and recent_def_plays.empty:
+            continue
+        
+        # Calculate recent EPA
+        recent_off_epa = recent_off_plays['epa'].mean() if not recent_off_plays.empty else 0
+        recent_def_epa = -recent_def_plays['epa'].mean() if not recent_def_plays.empty else 0
+        
+        # Get season stats for this team
+        season_off = season_off_epa.loc[team] if team in season_off_epa.index else {'season_off_epa': 0, 'season_off_std': DEFAULT_EPA_STD_DEV}
+        season_def = season_def_epa.loc[team] if team in season_def_epa.index else {'season_def_epa': 0, 'season_def_std': DEFAULT_EPA_STD_DEV}
+        
+        # Calculate z-scores (momentum)
+        off_std = season_off['season_off_std'] if season_off['season_off_std'] > MIN_EPA_STD_DEV else DEFAULT_EPA_STD_DEV
+        def_std = season_def['season_def_std'] if season_def['season_def_std'] > MIN_EPA_STD_DEV else DEFAULT_EPA_STD_DEV
+        
+        off_momentum = (recent_off_epa - season_off['season_off_epa']) / off_std
+        def_momentum = (recent_def_epa - season_def['season_def_epa']) / def_std
+        
+        # Clip extreme values to avoid outliers dominating
+        off_momentum = max(-MAX_MOMENTUM_ZSCORE, min(MAX_MOMENTUM_ZSCORE, off_momentum))
+        def_momentum = max(-MAX_MOMENTUM_ZSCORE, min(MAX_MOMENTUM_ZSCORE, def_momentum))
+        
+        momentum_data.append({
+            'team': team,
+            'recent_off_epa': round(recent_off_epa, 4),
+            'recent_def_epa': round(recent_def_epa, 4),
+            'off_momentum': round(off_momentum, 3),
+            'def_momentum': round(def_momentum, 3),
+            'total_momentum': round((off_momentum + def_momentum) / 2, 3),
+            'recent_games': len(game_ids)
+        })
+    
+    return pd.DataFrame(momentum_data)
 
 
 def load_team_epa(season: int = 2025, force_refresh: bool = False) -> pd.DataFrame:
@@ -204,6 +323,10 @@ def load_team_epa(season: int = 2025, force_refresh: bool = False) -> pd.DataFra
     # Total EPA
     team_epa['total_epa'] = team_epa['off_epa'] + team_epa['def_epa']
     
+    # Calculate and merge momentum data
+    print("📈 Calculating team momentum (recent form vs season average)...")
+    momentum_df = calculate_team_momentum(pbp, n_recent_games=4)
+    
     # Clean up and select final columns
     team_epa = team_epa.reset_index().rename(columns={'index': 'team', 'posteam': 'team'})
     if 'posteam' in team_epa.columns:
@@ -214,8 +337,21 @@ def load_team_epa(season: int = 2025, force_refresh: bool = False) -> pd.DataFra
         team_epa = team_epa.reset_index()
         team_epa.columns = ['team'] + list(team_epa.columns[1:])
     
+    # Merge momentum data
+    if not momentum_df.empty:
+        team_epa = team_epa.merge(
+            momentum_df[['team', 'recent_off_epa', 'recent_def_epa', 'off_momentum', 'def_momentum', 'total_momentum']],
+            on='team',
+            how='left'
+        )
+        # Fill missing momentum with 0 (neutral)
+        for col in ['off_momentum', 'def_momentum', 'total_momentum']:
+            team_epa[col] = team_epa[col].fillna(0)
+        print(f"   ✅ Added momentum data for {len(momentum_df)} teams")
+    
     # Select and order columns
-    final_cols = ['team', 'off_epa', 'def_epa', 'total_epa', 'off_plays', 'def_plays', 'ppg', 'ppg_allowed', 'games']
+    final_cols = ['team', 'off_epa', 'def_epa', 'total_epa', 'off_plays', 'def_plays', 
+                  'ppg', 'ppg_allowed', 'games', 'off_momentum', 'def_momentum', 'total_momentum']
     team_epa = team_epa[[c for c in final_cols if c in team_epa.columns]]
     
     # Remove any invalid team entries

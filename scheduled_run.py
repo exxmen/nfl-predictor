@@ -201,7 +201,9 @@ def format_results(results: dict, n_simulations: int) -> str:
         lines.append(f"  {'Team':<22} {'1st':>6} {'2nd':>6} {'3rd':>6} {'4th':>6} {'5th':>6} {'6th':>6} {'7th':>6}")
         lines.append("  " + "-" * 64)
         
-        for name, r in sorted_teams[:10]:
+        # Sort by 1st seed probability for this table
+        seed_sorted = sorted(sorted_teams[:10], key=lambda x: x[1]['seed_counts'][1], reverse=True)
+        for name, r in seed_sorted:
             seed_pcts = []
             for seed in range(1, 8):
                 pct = (r['seed_counts'][seed] / n_simulations) * 100
@@ -236,8 +238,11 @@ def format_results_markdown(results: dict, n_simulations: int) -> str:
     else:
         lines.append("- **Injuries:** ⚠️ Not available")
     
+    # Add momentum status
+    lines.append("- **Momentum:** 🔥 Enabled (last 4 games vs season average)")
+    
     lines.append("")
-    lines.append("*Probabilities calculated using EPA-based Poisson scoring model with Monte Carlo simulation, injury adjustments, and full NFL tiebreaker rules.*")
+    lines.append("*Probabilities calculated using EPA-based Poisson scoring model with Monte Carlo simulation, momentum adjustments (recent form), injury impacts, and full NFL tiebreaker rules.*")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -324,7 +329,13 @@ def format_results_markdown(results: dict, n_simulations: int) -> str:
         lines.append("| Team | 1st | 2nd | 3rd | 4th | 5th | 6th | 7th |")
         lines.append("|:-----|----:|----:|----:|----:|----:|----:|----:|")
         
-        for name, r in sorted_teams[:10]:
+        # Sort by 1st seed probability for this table
+        seed_sorted = sorted(
+            sorted_teams[:10], 
+            key=lambda x: x[1]['seed_counts'][1], 
+            reverse=True
+        )
+        for name, r in seed_sorted:
             seed_pcts = []
             for seed in range(1, 8):
                 pct = (r['seed_counts'][seed] / n_simulations) * 100

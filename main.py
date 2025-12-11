@@ -42,6 +42,8 @@ def parse_arguments():
                        help='Show current injury report and impacts')
     parser.add_argument('--no-injuries', action='store_true',
                        help='Disable injury adjustments in simulation')
+    parser.add_argument('--no-momentum', action='store_true',
+                       help='Disable momentum adjustments in simulation')
     return parser.parse_args()
 
 # Parse command line arguments
@@ -379,7 +381,8 @@ async def main():
             remaining_games=remaining_games,
             n_simulations=args.simulations,
             show_progress=not args.no_progress,
-            injury_impacts=injury_impacts
+            injury_impacts=injury_impacts,
+            use_momentum=not args.no_momentum
         )
 
         print_simulation_results(results, teams_data, n_simulations=args.simulations)
