@@ -18,3 +18,7 @@ dependencies = [
     "scipy>=1.15.0",
     "tqdm>=4.66.0",
 ]
+
+[project.scripts]
+nfl-predict = "main:main"
+nfl-scheduled = "scheduled_run:main"

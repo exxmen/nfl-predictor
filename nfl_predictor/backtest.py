@@ -20,16 +20,23 @@ from datetime import datetime
 import json
 from pathlib import Path
 
-from epa_loader import load_team_epa
-from nfl_tiebreakers import Game, TEAM_TO_CONFERENCE, TEAM_TO_DIVISION
+from .epa import load_team_epa
+from .tiebreakers import Game, TEAM_TO_CONFERENCE, TEAM_TO_DIVISION
 
 # Try to import injury modules (optional enhancement for current season)
 try:
-    from injury_loader import load_injury_data, load_snap_counts
-    from player_impact import get_all_team_impacts
+    from .injuries import load_injury_data, load_snap_counts
+    from .player_impact import get_all_team_impacts
     INJURIES_AVAILABLE = True
 except ImportError:
     INJURIES_AVAILABLE = False
+
+try:
+    from .simulation import run_advanced_simulation, build_season_data_from_standings
+    from .simulation import EPAGameSimulator, EPA_AVAILABLE
+    SIMULATION_AVAILABLE = True
+except ImportError:
+    SIMULATION_AVAILABLE = False
 
 
 # Team abbreviation to conference/division mapping
@@ -280,7 +287,7 @@ class NFLBacktester:
         Returns:
             Simulation results dict
         """
-        from advanced_simulation import run_advanced_simulation, build_season_data_from_standings
+        from .simulation import run_advanced_simulation, build_season_data_from_standings
         
         # Get standings and games at this point
         standings_dict = self.get_standings_at_week(schedule, from_week)
@@ -413,7 +420,7 @@ class NFLBacktester:
         correct_picks = 0
         total_picks = 0
         
-        from advanced_simulation import EPAGameSimulator, EPA_AVAILABLE
+        from .simulation import EPAGameSimulator, EPA_AVAILABLE
         
         # Load EPA for game predictions
         if self.use_epa and EPA_AVAILABLE:

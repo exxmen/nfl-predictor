@@ -23,7 +23,7 @@ from datetime import datetime, date, timezone
 # Add project to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from nfl_tiebreakers import get_current_nfl_week, NFL_2025_WEEK_STARTS
+from nfl_predictor.tiebreakers import get_current_nfl_week, NFL_2025_WEEK_STARTS
 
 
 def should_run_today() -> tuple[bool, str]:
@@ -69,9 +69,9 @@ def clear_caches():
 def run_simulation(n_simulations: int = 100000) -> dict:
     """Run the simulation and return results"""
     import asyncio
-    from advanced_simulation import run_advanced_simulation, build_season_data_from_standings
-    from pfr_scraper import scrape_pfr_schedule_simple, scrape_pfr_standings
-    from nfl_tiebreakers import Game
+    from nfl_predictor.simulation import run_advanced_simulation, build_season_data_from_standings
+    from nfl_predictor.scraper import scrape_pfr_schedule_simple, scrape_pfr_standings
+    from nfl_predictor.tiebreakers import Game
     
     # Get fresh standings
     teams_data = scrape_pfr_standings()
@@ -92,8 +92,8 @@ def run_simulation(n_simulations: int = 100000) -> dict:
     # Load injury data
     injury_impacts = None
     try:
-        from injury_loader import load_injury_data, load_snap_counts, get_current_nfl_week
-        from player_impact import get_all_team_impacts
+        from nfl_predictor.injuries import load_injury_data, load_snap_counts, get_current_nfl_week
+        from nfl_predictor.player_impact import get_all_team_impacts
         
         injuries_df = load_injury_data(2025)
         snap_counts_df = load_snap_counts(2025)
@@ -126,7 +126,7 @@ def run_simulation(n_simulations: int = 100000) -> dict:
 
 def format_results(results: dict, n_simulations: int) -> str:
     """Format results as a string report"""
-    from nfl_tiebreakers import TEAM_TO_DIVISION
+    from nfl_predictor.tiebreakers import TEAM_TO_DIVISION
     
     teams_data = results['teams_data']
     sim_results = results['results']
@@ -215,7 +215,7 @@ def format_results(results: dict, n_simulations: int) -> str:
 
 def format_results_markdown(results: dict, n_simulations: int) -> str:
     """Format results as a properly formatted Markdown document"""
-    from nfl_tiebreakers import TEAM_TO_DIVISION
+    from nfl_predictor.tiebreakers import TEAM_TO_DIVISION
     
     teams_data = results['teams_data']
     sim_results = results['results']

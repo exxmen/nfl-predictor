@@ -13,10 +13,14 @@ from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
 from browser_use import Agent, ChatGoogle, Browser
-from nfl_tiebreakers import (
-    Game, TEAM_TO_CONFERENCE, TEAM_TO_DIVISION,
-    save_games_cache, load_games_cache,
-    save_schedule_cache, load_schedule_cache
+from .tiebreakers import (
+    Game,
+    TEAM_TO_CONFERENCE,
+    TEAM_TO_DIVISION,
+    get_current_nfl_week,
+    is_cache_valid_for_week,
+    save_schedule_cache, load_schedule_cache,
+    save_games_cache, load_games_cache
 )
 
 
@@ -469,7 +473,7 @@ STANDINGS_CACHE_FILE = "nfl_standings_cache.json"
 def load_standings_cache():
     """Load standings from cache if valid based on NFL week schedule"""
     import time
-    from nfl_tiebreakers import get_current_nfl_week, is_cache_valid_for_week
+    from .tiebreakers import get_current_nfl_week, is_cache_valid_for_week
     
     if not os.path.exists(STANDINGS_CACHE_FILE):
         return None
@@ -501,7 +505,7 @@ def load_standings_cache():
 def save_standings_cache(teams_data):
     """Save standings to cache with week metadata"""
     import time
-    from nfl_tiebreakers import get_current_nfl_week
+    from .tiebreakers import get_current_nfl_week
     
     try:
         current_week = get_current_nfl_week()

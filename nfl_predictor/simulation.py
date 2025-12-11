@@ -16,15 +16,19 @@ from tqdm import tqdm
 from scipy.stats import poisson
 import pandas as pd
 
-from nfl_tiebreakers import (
-    Game, TeamStats, SeasonData,
-    TEAM_TO_CONFERENCE, TEAM_TO_DIVISION,
-    NFLTiebreaker, GameSimulator
+from .tiebreakers import (
+    Game,
+    SeasonData,
+    TeamStats,
+    NFLTiebreaker,
+    TEAM_TO_DIVISION,
+    TEAM_TO_CONFERENCE,
+    get_current_nfl_week
 )
 
 # Try to import EPA loader (optional enhancement)
 try:
-    from epa_loader import load_team_epa, get_league_averages
+    from .epa import load_team_epa, get_league_averages
     EPA_AVAILABLE = True
 except ImportError:
     EPA_AVAILABLE = False

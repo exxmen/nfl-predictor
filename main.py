@@ -9,16 +9,16 @@ import pandas as pd
 
 # Advanced simulation with real tiebreakers
 try:
-    from advanced_simulation import (
+    from nfl_predictor.simulation import (
         run_advanced_simulation,
         print_simulation_results,
         build_season_data_from_standings
     )
-    from pfr_scraper import (
+    from nfl_predictor.scraper import (
         scrape_pfr_schedule_simple,
         scrape_pfr_standings
     )
-    from nfl_tiebreakers import Game
+    from nfl_predictor.tiebreakers import Game
     ADVANCED_MODE = True
 except ImportError as e:
     print(f"⚠️ Advanced mode not available: {e}")
@@ -315,8 +315,8 @@ async def main():
     injury_impacts = None
     if not args.no_injuries and ADVANCED_MODE:
         try:
-            from injury_loader import load_injury_data, load_snap_counts, get_current_nfl_week
-            from player_impact import get_all_team_impacts
+            from nfl_predictor.injuries import load_injury_data, load_snap_counts, get_current_nfl_week
+            from nfl_predictor.player_impact import get_all_team_impacts
 
             print("\n🏥 Loading injury data...")
             injuries_df = load_injury_data(season=2025)
@@ -343,10 +343,10 @@ async def main():
 
             # Show detailed injury summary if requested
             if args.show_injuries:
-                from injury_loader import print_injury_summary
+                from nfl_predictor.injuries import print_injury_summary
                 print_injury_summary(injuries_df, current_week)
 
-                from player_impact import print_team_impact_summary
+                from nfl_predictor.player_impact import print_team_impact_summary
                 print_team_impact_summary(injury_impacts, injuries_df, current_week)
 
         except Exception as e:
