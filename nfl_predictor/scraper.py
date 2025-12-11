@@ -473,7 +473,7 @@ STANDINGS_CACHE_FILE = "cache/nfl_standings_cache.json"
 def load_standings_cache():
     """Load standings from cache if valid based on NFL week schedule"""
     import time
-    from .tiebreakers import get_current_nfl_week, is_cache_valid_for_week
+    from .config import get_current_nfl_week, is_cache_valid_for_week
     
     if not os.path.exists(STANDINGS_CACHE_FILE):
         return None

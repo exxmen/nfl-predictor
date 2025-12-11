@@ -11,6 +11,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 import json
+from .config import get_current_season, get_current_nfl_week
 
 
 # Cache directory
@@ -28,24 +29,7 @@ def get_cache_files(season: int) -> tuple:
         CACHE_DIR / f"team_epa_{season}_meta.json"
     )
 
-# NFL week start dates for 2025 (for cache invalidation)
-NFL_2025_WEEK_STARTS = {
-    1: "2025-09-04", 2: "2025-09-11", 3: "2025-09-18", 4: "2025-09-25",
-    5: "2025-10-02", 6: "2025-10-09", 7: "2025-10-16", 8: "2025-10-23",
-    9: "2025-10-30", 10: "2025-11-06", 11: "2025-11-13", 12: "2025-11-20",
-    13: "2025-11-27", 14: "2025-12-04", 15: "2025-12-11", 16: "2025-12-18",
-    17: "2025-12-25", 18: "2026-01-03"
-}
-
-
-def get_current_nfl_week() -> int:
-    """Determine the current NFL week based on date."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    current_week = 1
-    for week, start_date in NFL_2025_WEEK_STARTS.items():
-        if today >= start_date:
-            current_week = week
-    return current_week
+# NFL week start dates and current week logic moved to config.py
 
 def is_cache_valid(season: int) -> bool:
     """Check if EPA cache is still valid for the given season."""
@@ -189,7 +173,7 @@ def calculate_team_momentum(pbp: pd.DataFrame, n_recent_games: int = 4) -> pd.Da
     return pd.DataFrame(momentum_data)
 
 
-def load_team_epa(season: int = 2025, force_refresh: bool = False) -> pd.DataFrame:
+def load_team_epa(season: int = None, force_refresh: bool = False) -> pd.DataFrame:
     """
     Load team-level EPA stats from play-by-play data.
     
@@ -211,6 +195,9 @@ def load_team_epa(season: int = 2025, force_refresh: bool = False) -> pd.DataFra
         DataFrame with team EPA stats
     """
     CACHE_DIR.mkdir(exist_ok=True)
+    
+    if season is None:
+        season = get_current_season()
     
     # Get season-specific cache files
     cache_file, meta_file = get_cache_files(season)
@@ -421,7 +408,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Load NFL team EPA stats")
-    parser.add_argument("--season", type=int, default=2025, help="NFL season year")
+    parser.add_argument("--season", type=int, default=get_current_season(), help="NFL season year")
     parser.add_argument("--force", action="store_true", help="Force refresh from API")
     args = parser.parse_args()
     

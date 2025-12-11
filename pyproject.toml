@@ -20,5 +20,12 @@ dependencies = [
 ]
 
 [project.scripts]
-nfl-predict = "main:main"
-nfl-scheduled = "scheduled_run:main"
+nfl-predict = "nfl_predictor.cli:main"
+nfl-scheduled = "nfl_predictor.scheduler:main"
+
+[tool.uv]
+package = true
+
+[tool.setuptools.packages.find]
+include = ["nfl_predictor*"]
+exclude = ["cache*", "results*", "tests*"]

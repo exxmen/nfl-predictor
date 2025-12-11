@@ -13,17 +13,13 @@ PHT (UTC+8) timing considerations:
 - Monday Night Football ends ~midnight ET = Tuesday 1:00 PM PHT
 - So Tuesday-Thursday mornings PHT are ideal for updated predictions
 """
-
 import os
 import sys
 import json
 import time
 from datetime import datetime, date, timezone
-
-# Add project to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from nfl_predictor.tiebreakers import get_current_nfl_week, NFL_2025_WEEK_STARTS
+from .config import get_current_season, get_current_nfl_week, NFL_WEEK_STARTS
+from .tiebreakers import get_current_nfl_week as get_week_tiebreaker
 
 
 def should_run_today() -> tuple[bool, str]:

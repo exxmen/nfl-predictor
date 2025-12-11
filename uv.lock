@@ -1575,7 +1575,7 @@ wheels = [
 [[package]]
 name = "nfl-predictor"
 version = "0.2.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "beautifulsoup4" },

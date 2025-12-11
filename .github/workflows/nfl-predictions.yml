@@ -31,7 +31,7 @@ jobs:
 
       - name: Run predictions
         run: |
-          uv run python scheduled_run.py --simulations 100000
+          uv run nfl-scheduled --simulations 100000
           echo "Results generated:"
           ls -la results/
 
