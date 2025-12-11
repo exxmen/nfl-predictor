@@ -6,8 +6,7 @@ based on position importance and playing time.
 """
 
 import pandas as pd
-import numpy as np
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 # Position impact weights (0.0-1.0 scale, QB = most valuable)
 POSITION_IMPACT = {
@@ -184,7 +183,7 @@ def get_player_snap_share(gsis_id: str, snap_counts_df: pd.DataFrame, position: 
     if position in OFFENSIVE_POSITIONS:
         # Offensive snap percentage
         if 'offense_pct' in recent_snaps.columns:
-            snap_pct = recent_snaps['offense_pct'].iloc[0] / 100.0
+            snap_pct = recent_snaps['offense_pct'].iloc[0]  # Already 0-1 scale
         elif 'offense_snaps' in recent_snaps.columns:
             # Estimate percentage (rough calculation)
             offense_snaps = recent_snaps['offense_snaps'].iloc[0]
@@ -192,7 +191,7 @@ def get_player_snap_share(gsis_id: str, snap_counts_df: pd.DataFrame, position: 
     else:
         # Defensive snap percentage
         if 'defense_pct' in recent_snaps.columns:
-            snap_pct = recent_snaps['defense_pct'].iloc[0] / 100.0
+            snap_pct = recent_snaps['defense_pct'].iloc[0]  # Already 0-1 scale
         elif 'defense_snaps' in recent_snaps.columns:
             defense_snaps = recent_snaps['defense_snaps'].iloc[0]
             snap_pct = min(1.0, defense_snaps / 70.0)  # Assume ~70 defensive snaps per game
@@ -450,4 +449,4 @@ if __name__ == "__main__":
     print(f"\n🏈 Position Impact Weights:")
     print("-" * 40)
     for pos, weight in sorted(POSITION_IMPACT.items(), key=lambda x: x[1], reverse=True):
-        print("4.2f")
+        print(f"{pos}: {weight:.2f}")
