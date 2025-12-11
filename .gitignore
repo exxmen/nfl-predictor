@@ -10,9 +10,11 @@ wheels/
 .venv
 
 # Cache files (regenerated on run)
-nfl_standings_cache.json
-nfl_games_cache.json
-nfl_schedule_cache.json
+# Cache
+cache/
+# nfl_standings_cache.json (legacy)
+# nfl_games_cache.json (legacy)
+# nfl_schedule_cache.json (legacy)
 data/
 
 # Results (generated locally)
@@ -35,4 +37,3 @@ results/
 
 # Claude
 .claude/
-backtest_results.json

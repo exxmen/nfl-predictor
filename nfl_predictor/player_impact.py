@@ -432,7 +432,14 @@ def print_team_impact_summary(
             print(f"  {status_icon} {player} - {status} ({injury_desc})")
 
 if __name__ == "__main__":
-    from injury_loader import load_injury_data, load_snap_counts, get_current_nfl_week
+    try:
+        from .injuries import load_injury_data, load_snap_counts, get_current_nfl_week
+    except ImportError:
+        # Just for type hinting/IDE
+        import pandas as pd
+        def load_injury_data(*args, **kwargs): return {}
+        def load_snap_counts(*args, **kwargs): return pd.DataFrame()
+        def get_current_nfl_week(*args, **kwargs): return 1 # Default to week 1 if not found
 
     # Load data
     injuries_df = load_injury_data(2025)

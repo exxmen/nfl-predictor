@@ -10,12 +10,13 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 import json
+from .config import get_current_season, get_current_nfl_week
 import requests
 from bs4 import BeautifulSoup
 import re
 
 # Cache directory
-CACHE_DIR = Path("data")
+CACHE_DIR = Path("cache")
 
 def get_cache_files(season: int) -> tuple:
     """Get cache file paths for a specific season."""
@@ -25,23 +26,7 @@ def get_cache_files(season: int) -> tuple:
         CACHE_DIR / f"injuries_{season}_meta.json"
     )
 
-# NFL week start dates for 2025 (for cache invalidation)
-NFL_2025_WEEK_STARTS = {
-    1: "2025-09-04", 2: "2025-09-11", 3: "2025-09-18", 4: "2025-09-25",
-    5: "2025-10-02", 6: "2025-10-09", 7: "2025-10-16", 8: "2025-10-23",
-    9: "2025-10-30", 10: "2025-11-06", 11: "2025-11-13", 12: "2025-11-20",
-    13: "2025-11-27", 14: "2025-12-04", 15: "2025-12-11", 16: "2025-12-18",
-    17: "2025-12-25", 18: "2026-01-03"
-}
-
-def get_current_nfl_week() -> int:
-    """Determine the current NFL week based on date."""
-    today = datetime.now().strftime("%Y-%m-%d")
-    current_week = 1
-    for week, start_date in NFL_2025_WEEK_STARTS.items():
-        if today >= start_date:
-            current_week = week
-    return current_week
+# NFL week start dates and current week logic moved to config.py
 
 def is_cache_valid(season: int) -> bool:
     """Check if injury cache is still valid for the given season."""
@@ -70,7 +55,7 @@ def is_cache_valid(season: int) -> bool:
     except Exception:
         return False
 
-def scrape_espn_injuries(season: int = 2025) -> pd.DataFrame:
+def scrape_espn_injuries(season: int = None) -> pd.DataFrame:
     """
     Scrape current NFL injury data from ESPN.com.
 
@@ -83,6 +68,9 @@ def scrape_espn_injuries(season: int = 2025) -> pd.DataFrame:
     Returns:
         DataFrame with injury data
     """
+    if season is None:
+        season = get_current_season()
+        
     url = "https://www.espn.com/nfl/injuries"
     print(f"🌐 Scraping injury data from ESPN...")
 
@@ -218,7 +206,7 @@ def scrape_espn_injuries(season: int = 2025) -> pd.DataFrame:
         traceback.print_exc()
         return pd.DataFrame()
 
-def load_injury_data(season: int = 2025, force_refresh: bool = False) -> pd.DataFrame:
+def load_injury_data(season: int = None, force_refresh: bool = False) -> pd.DataFrame:
     """
     Load injury data with fallback hierarchy: ESPN → nfl_data_py → cache.
 
@@ -235,6 +223,9 @@ def load_injury_data(season: int = 2025, force_refresh: bool = False) -> pd.Data
     Returns:
         DataFrame with injury data
     """
+    if season is None:
+        season = get_current_season()
+        
     CACHE_DIR.mkdir(exist_ok=True)
 
     # Get season-specific cache files
@@ -318,7 +309,7 @@ def load_injury_data(season: int = 2025, force_refresh: bool = False) -> pd.Data
 
     return injuries_df
 
-def load_snap_counts(season: int = 2025, force_refresh: bool = False) -> pd.DataFrame:
+def load_snap_counts(season: int = None, force_refresh: bool = False) -> pd.DataFrame:
     """
     Load snap count data to determine player importance.
 
@@ -329,6 +320,9 @@ def load_snap_counts(season: int = 2025, force_refresh: bool = False) -> pd.Data
         season: NFL season year
         force_refresh: Force re-fetch even if cache is valid
     """
+    if season is None:
+        season = get_current_season()
+        
     CACHE_DIR.mkdir(exist_ok=True)
 
     # Get season-specific cache files
@@ -438,7 +432,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Load NFL injury data")
-    parser.add_argument("--season", type=int, default=2025, help="NFL season year")
+    parser.add_argument("--season", type=int, default=get_current_season(), help="NFL season year")
     parser.add_argument("--force", action="store_true", help="Force refresh from API")
     parser.add_argument("--summary", action="store_true", help="Show injury summary")
     args = parser.parse_args()

@@ -22,7 +22,7 @@ NFL_DIVISIONS = {
     'AFC': ['East', 'North', 'South', 'West'],
     'NFC': ['East', 'North', 'South', 'West']
 }
-
+from .config import get_current_season, get_current_nfl_week, is_cache_valid_for_week
 NFL_TEAMS = {
     'AFC': {
         'East': ['Buffalo Bills', 'Miami Dolphins', 'New England Patriots', 'New York Jets'],
@@ -848,86 +848,10 @@ def run_single_simulation(base_season: SeasonData) -> Dict[str, List[str]]:
 # CACHING
 # ==========================================
 
-GAMES_CACHE_FILE = "nfl_games_cache.json"
-SCHEDULE_CACHE_FILE = "nfl_schedule_cache.json"
+GAMES_CACHE_FILE = "cache/nfl_games_cache.json"
+SCHEDULE_CACHE_FILE = "cache/nfl_schedule_cache.json"
 
-# NFL 2025 Regular Season Week Start Dates (Thursday of each week)
-# Games typically start Thursday evening and run through Monday night
-NFL_2025_WEEK_STARTS = {
-    1: "2025-09-04",
-    2: "2025-09-11",
-    3: "2025-09-18",
-    4: "2025-09-25",
-    5: "2025-10-02",
-    6: "2025-10-09",
-    7: "2025-10-16",
-    8: "2025-10-23",
-    9: "2025-10-30",
-    10: "2025-11-06",
-    11: "2025-11-13",
-    12: "2025-11-20",
-    13: "2025-11-27",
-    14: "2025-12-04",
-    15: "2025-12-11",
-    16: "2025-12-18",
-    17: "2025-12-25",
-    18: "2026-01-01",
-}
-
-
-def get_current_nfl_week() -> int:
-    """Determine the current NFL week based on today's date"""
-    from datetime import datetime, date
-    
-    today = date.today()
-    
-    # Find the current week by checking which week has started
-    current_week = 0
-    for week, start_date_str in NFL_2025_WEEK_STARTS.items():
-        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
-        if today >= start_date:
-            current_week = week
-    
-    return current_week
-
-
-def is_cache_valid_for_week(cache_timestamp: float, cached_week: int) -> bool:
-    """
-    Check if cache is still valid based on NFL week schedule.
-    
-    Cache should be invalidated when:
-    1. A new week's games have started (Thursday)
-    2. We're in the same week but games might have been played
-    
-    Logic:
-    - If we're in a later week than when cache was created, invalidate
-    - If we're in the same week, check if games have likely started
-    """
-    from datetime import datetime, date
-    
-    current_week = get_current_nfl_week()
-    
-    # If current week is ahead of cached week, cache is stale
-    if current_week > cached_week:
-        return False
-    
-    # If we're in the same week, check if enough time has passed
-    # that games results might have changed (after Thursday 8pm ET = ~1am UTC Friday)
-    today = date.today()
-    
-    if current_week > 0 and current_week in NFL_2025_WEEK_STARTS:
-        week_start_str = NFL_2025_WEEK_STARTS[current_week]
-        week_start = datetime.strptime(week_start_str, "%Y-%m-%d").date()
-        
-        # If today is on or after the week start date,
-        # check if cache was created before games started
-        if today >= week_start:
-            cache_date = datetime.fromtimestamp(cache_timestamp).date()
-            # Cache is stale if it was created before this week's games started
-            if cache_date < week_start:
-                return False
-    
-    return True
+# NFL week logic and cache validation moved to config.py
 
 
 def save_games_cache(games: List[Game]):
@@ -953,6 +877,8 @@ def save_games_cache(games: List[Game]):
             for g in games
         ]
     }
+    import os
+    os.makedirs(os.path.dirname(GAMES_CACHE_FILE), exist_ok=True)
     with open(GAMES_CACHE_FILE, 'w') as f:
         json.dump(data, f, indent=2)
     print(f"💾 Saved {len(games)} games to {GAMES_CACHE_FILE}")
@@ -1016,6 +942,8 @@ def save_schedule_cache(games: List[Game]):
             for g in games
         ]
     }
+    import os
+    os.makedirs(os.path.dirname(SCHEDULE_CACHE_FILE), exist_ok=True)
     with open(SCHEDULE_CACHE_FILE, 'w') as f:
         json.dump(data, f, indent=2)
     print(f"💾 Saved {len(games)} scheduled games to {SCHEDULE_CACHE_FILE}")
