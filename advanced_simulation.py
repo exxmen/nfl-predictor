@@ -30,6 +30,12 @@ except ImportError:
     EPA_AVAILABLE = False
 
 
+# Momentum calculation constants
+MIN_GAMES_FOR_MOMENTUM = 3  # Minimum games needed for meaningful momentum calculation
+MIN_MARGIN_STD_DEV = 7.0  # Minimum std dev for point margins (prevents over-sensitivity)
+MAX_MOMENTUM_ZSCORE = 3.0  # Clip momentum z-scores to prevent extreme outliers
+
+
 def calculate_game_momentum(completed_games: List[Game], n_recent: int = 4) -> Dict[str, Dict[str, float]]:
     """
     Calculate team momentum from completed game margins.
@@ -63,7 +69,7 @@ def calculate_game_momentum(completed_games: List[Game], n_recent: int = 4) -> D
     momentum_data = {}
     
     for team, games in team_games.items():
-        if len(games) < 3:  # Need at least 3 games for meaningful momentum
+        if len(games) < MIN_GAMES_FOR_MOMENTUM:
             continue
         
         # Sort by week (most recent last)
@@ -78,8 +84,8 @@ def calculate_game_momentum(completed_games: List[Game], n_recent: int = 4) -> D
         season_pf = sum(all_pf) / len(all_pf)
         season_pa = sum(all_pa) / len(all_pa)
         
-        # Calculate std dev for z-score (use margin std dev, min 7 to avoid over-sensitivity)
-        margin_std = max(7.0, np.std(all_margins)) if len(all_margins) > 1 else 7.0
+        # Calculate std dev for z-score (use margin std dev, min threshold to avoid over-sensitivity)
+        margin_std = max(MIN_MARGIN_STD_DEV, np.std(all_margins)) if len(all_margins) > 1 else MIN_MARGIN_STD_DEV
         
         # Get recent games (last n_recent)
         recent_games = games[-n_recent:]
@@ -96,15 +102,15 @@ def calculate_game_momentum(completed_games: List[Game], n_recent: int = 4) -> D
         total_momentum = (recent_margin - season_margin) / margin_std
         
         # Offensive momentum: scoring more recently than usual
-        off_momentum = (recent_pf_avg - season_pf) / max(7.0, np.std(all_pf) if len(all_pf) > 1 else 7.0)
+        off_momentum = (recent_pf_avg - season_pf) / max(MIN_MARGIN_STD_DEV, np.std(all_pf) if len(all_pf) > 1 else MIN_MARGIN_STD_DEV)
         
         # Defensive momentum: allowing fewer points recently than usual
-        def_momentum = (season_pa - recent_pa_avg) / max(7.0, np.std(all_pa) if len(all_pa) > 1 else 7.0)
+        def_momentum = (season_pa - recent_pa_avg) / max(MIN_MARGIN_STD_DEV, np.std(all_pa) if len(all_pa) > 1 else MIN_MARGIN_STD_DEV)
         
-        # Clip to reasonable range (-3 to +3 standard deviations)
-        total_momentum = max(-3.0, min(3.0, total_momentum))
-        off_momentum = max(-3.0, min(3.0, off_momentum))
-        def_momentum = max(-3.0, min(3.0, def_momentum))
+        # Clip to reasonable range to prevent extreme outliers
+        total_momentum = max(-MAX_MOMENTUM_ZSCORE, min(MAX_MOMENTUM_ZSCORE, total_momentum))
+        off_momentum = max(-MAX_MOMENTUM_ZSCORE, min(MAX_MOMENTUM_ZSCORE, off_momentum))
+        def_momentum = max(-MAX_MOMENTUM_ZSCORE, min(MAX_MOMENTUM_ZSCORE, def_momentum))
         
         momentum_data[team] = {
             'off_momentum': round(off_momentum, 3),
@@ -538,7 +544,7 @@ def run_advanced_simulation(
         )
         if simulator.has_momentum and use_momentum:
             if is_current_season and game_momentum:
-                print("📈 Using game-based momentum (from 2025 score margins)")
+                print(f"📈 Using game-based momentum (from {season} score margins)")
             elif simulator.has_epa_momentum:
                 print(f"📈 Using EPA-based momentum (from {season} play-by-play)")
     else:

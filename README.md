@@ -15,7 +15,7 @@ Updated automatically via GitHub Actions every Tuesday and Friday during the NFL
 - 🏥 **Injury Impact Analysis**: Scrapes ESPN injuries, matches to snap counts for starter detection, adjusts team strength based on player availability
 - 🏈 **Real NFL Tiebreaker Rules**: Implements all 12 division and 11 wild card tiebreaker steps
 - 📊 **Monte Carlo Simulation**: 100,000 simulations for accurate probability estimates
-- ✅ **Validated Accuracy**: 74% win prediction accuracy, 0.19 Brier score (backtested on 2024 season)
+- ✅ **Validated Accuracy**: 73% win prediction accuracy, 0.19 Brier score (backtested on 2024 season)
 - 🚀 **Fast HTTP Scraping**: Gets standings and game data from Pro-Football-Reference (no browser needed)
 - 📅 **Smart Caching**: Week-based cache invalidation (refreshes when new NFL week starts)
 - ⚙️ **GitHub Actions**: Automated runs update a public Gist with latest predictions

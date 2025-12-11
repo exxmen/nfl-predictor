@@ -16,6 +16,11 @@ import json
 # Cache directory
 CACHE_DIR = Path("data")
 
+# Momentum calculation constants
+MIN_EPA_STD_DEV = 0.01  # Minimum std dev threshold (prevents division by near-zero)
+DEFAULT_EPA_STD_DEV = 0.1  # Default std dev when data is insufficient
+MAX_MOMENTUM_ZSCORE = 3.0  # Clip momentum z-scores to prevent extreme outliers
+
 def get_cache_files(season: int) -> tuple:
     """Get cache file paths for a specific season."""
     return (
@@ -157,19 +162,19 @@ def calculate_team_momentum(pbp: pd.DataFrame, n_recent_games: int = 4) -> pd.Da
         recent_def_epa = -recent_def_plays['epa'].mean() if not recent_def_plays.empty else 0
         
         # Get season stats for this team
-        season_off = season_off_epa.loc[team] if team in season_off_epa.index else {'season_off_epa': 0, 'season_off_std': 0.1}
-        season_def = season_def_epa.loc[team] if team in season_def_epa.index else {'season_def_epa': 0, 'season_def_std': 0.1}
+        season_off = season_off_epa.loc[team] if team in season_off_epa.index else {'season_off_epa': 0, 'season_off_std': DEFAULT_EPA_STD_DEV}
+        season_def = season_def_epa.loc[team] if team in season_def_epa.index else {'season_def_epa': 0, 'season_def_std': DEFAULT_EPA_STD_DEV}
         
         # Calculate z-scores (momentum)
-        off_std = season_off['season_off_std'] if season_off['season_off_std'] > 0.01 else 0.1
-        def_std = season_def['season_def_std'] if season_def['season_def_std'] > 0.01 else 0.1
+        off_std = season_off['season_off_std'] if season_off['season_off_std'] > MIN_EPA_STD_DEV else DEFAULT_EPA_STD_DEV
+        def_std = season_def['season_def_std'] if season_def['season_def_std'] > MIN_EPA_STD_DEV else DEFAULT_EPA_STD_DEV
         
         off_momentum = (recent_off_epa - season_off['season_off_epa']) / off_std
         def_momentum = (recent_def_epa - season_def['season_def_epa']) / def_std
         
         # Clip extreme values to avoid outliers dominating
-        off_momentum = max(-3.0, min(3.0, off_momentum))
-        def_momentum = max(-3.0, min(3.0, def_momentum))
+        off_momentum = max(-MAX_MOMENTUM_ZSCORE, min(MAX_MOMENTUM_ZSCORE, off_momentum))
+        def_momentum = max(-MAX_MOMENTUM_ZSCORE, min(MAX_MOMENTUM_ZSCORE, def_momentum))
         
         momentum_data.append({
             'team': team,

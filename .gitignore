@@ -35,3 +35,4 @@ results/
 
 # Claude
 .claude/
+backtest_results.json
