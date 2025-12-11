@@ -38,6 +38,10 @@ def parse_arguments():
                        help='Number of Monte Carlo simulations (default: 10000)')
     parser.add_argument('--no-progress', action='store_true',
                        help='Disable progress bar')
+    parser.add_argument('--show-injuries', action='store_true',
+                       help='Show current injury report and impacts')
+    parser.add_argument('--no-injuries', action='store_true',
+                       help='Disable injury adjustments in simulation')
     return parser.parse_args()
 
 # Parse command line arguments
@@ -305,15 +309,58 @@ async def main():
     teams_data = get_nfl_standings()
     if not teams_data: return
 
+    # Load injury data if requested
+    injury_impacts = None
+    if not args.no_injuries and ADVANCED_MODE:
+        try:
+            from injury_loader import load_injury_data, load_snap_counts, get_current_nfl_week
+            from player_impact import get_all_team_impacts
+
+            print("\n🏥 Loading injury data...")
+            injuries_df = load_injury_data(season=2025)
+            snap_counts_df = load_snap_counts(season=2025)
+            current_week = get_current_nfl_week()
+
+            # Calculate injury impacts
+            injury_impacts = get_all_team_impacts(injuries_df, snap_counts_df, current_week)
+
+            if injury_impacts:
+                print(f"📋 Calculated injury impacts for {len(injury_impacts)} teams")
+                # Show summary of impacts
+                significant_impacts = [
+                    (team, impact) for team, impact in injury_impacts.items()
+                    if impact['total_impact'] > 0.01
+                ]
+                if significant_impacts:
+                    print("   Teams with significant injury impacts:")
+                    for team, impact in sorted(significant_impacts, key=lambda x: x[1]['total_impact'], reverse=True):
+                        total_pct = impact['total_impact'] * 100
+                        print(f"     {team}: {total_pct:.1f}% impact")
+            else:
+                print("✅ No significant injuries this week")
+
+            # Show detailed injury summary if requested
+            if args.show_injuries:
+                from injury_loader import print_injury_summary
+                print_injury_summary(injuries_df, current_week)
+
+                from player_impact import print_team_impact_summary
+                print_team_impact_summary(injury_impacts, injuries_df, current_week)
+
+        except Exception as e:
+            print(f"⚠️ Failed to load injury data: {e}")
+            print("   Continuing without injury adjustments")
+            injury_impacts = None
+
     # Check if we should use advanced mode
     use_advanced = ADVANCED_MODE and not args.simple
-    
+
     if use_advanced:
         print("\n🔄 Fetching game data from Pro-Football-Reference...")
         try:
             # Use HTTP scraper (fast and reliable)
             completed_games, remaining_games = await scrape_pfr_schedule_simple(season=2025)
-            
+
             if not completed_games:
                 print("⚠️ No game data available, falling back to simple mode")
                 use_advanced = False
@@ -323,7 +370,7 @@ async def main():
             print(f"⚠️ Failed to fetch game data: {e}")
             print("   Falling back to simple simulation mode")
             use_advanced = False
-    
+
     if use_advanced:
         # Run advanced simulation with real tiebreakers
         results = run_advanced_simulation(
@@ -331,9 +378,10 @@ async def main():
             completed_games=completed_games,
             remaining_games=remaining_games,
             n_simulations=args.simulations,
-            show_progress=not args.no_progress
+            show_progress=not args.no_progress,
+            injury_impacts=injury_impacts
         )
-        
+
         print_simulation_results(results, teams_data, n_simulations=args.simulations)
         return  # Advanced mode handles its own output
     
