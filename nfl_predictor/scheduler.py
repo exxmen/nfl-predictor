@@ -24,17 +24,9 @@ from .tiebreakers import get_current_nfl_week as get_week_tiebreaker
 
 def should_run_today() -> tuple[bool, str]:
     """
-    Check if we should run today based on:
-    1. Day of week (Tuesday=1, Wednesday=2, Thursday=3 in Python's weekday())
-    2. NFL season dates
+    Check if we should run today based on NFL season dates.
     """
     today = date.today()
-    weekday = today.weekday()  # Monday=0, Tuesday=1, Wednesday=2, Thursday=3
-    
-    # Only run Tuesday, Wednesday, Thursday
-    if weekday not in [1, 2, 3]:
-        day_name = today.strftime('%A')
-        return False, f"Skipping: Today is {day_name}, only runs Tue-Thu"
     
     # Check if we're in NFL season (Week 1 start to Week 18 end)
     current_week = get_current_nfl_week()
@@ -43,9 +35,14 @@ def should_run_today() -> tuple[bool, str]:
         return False, "Skipping: NFL season hasn't started yet"
     
     if current_week > 18:
+        # Check if we are in playoffs? 
+        # For now, let's assume > 18 means season over unless we add playoff logic later.
+        # But if the user wants to run on demand, maybe we should loosen this too?
+        # The prompt specifically asked to "remove the check for the day". 
+        # I'll keep the season check for now to avoid running in June.
         return False, "Skipping: NFL regular season is over"
     
-    return True, f"Running: Week {current_week}, {today.strftime('%A %Y-%m-%d')}"
+    return True, f"Running: Week {current_week}, {today.strftime('%Y-%m-%d')}"
 
 
 def clear_caches():
@@ -102,6 +99,18 @@ def run_simulation(n_simulations: int = 100000) -> dict:
         print(f"⚠️ Injury data unavailable: {e}")
     
     # Run simulation
+    # First, calculate CURRENT playoff picture (if season ended today)
+    from nfl_predictor.tiebreakers import NFLTiebreaker, SeasonData
+    
+    # helper to build season data needed for tiebreaker
+    base_season = build_season_data_from_standings(teams_data, completed_games, remaining_games)
+    tiebreaker = NFLTiebreaker(base_season)
+    
+    current_seeding = {
+        'AFC': tiebreaker.determine_playoff_seeding('AFC'),
+        'NFC': tiebreaker.determine_playoff_seeding('NFC')
+    }
+    
     results = run_advanced_simulation(
         standings=teams_data,
         completed_games=completed_games,
@@ -116,7 +125,8 @@ def run_simulation(n_simulations: int = 100000) -> dict:
         'results': results,
         'completed_games': len(completed_games),
         'remaining_games': len(remaining_games),
-        'injury_impacts': injury_impacts
+        'injury_impacts': injury_impacts,
+        'current_seeding': current_seeding
     }
 
 
@@ -242,6 +252,62 @@ def format_results_markdown(results: dict, n_simulations: int) -> str:
     lines.append("")
     lines.append("---")
     lines.append("")
+
+    lines.append("")
+
+    # Current Playoff Bracket (If Season Ended Today)
+    if 'current_seeding' in results:
+        lines.append("## 📅 Current Playoff Bracket (If Season Ended Today)")
+        lines.append("")
+        lines.append("```text")
+        
+        # Helper to format a matchup line
+        def format_matchup(seed_high, team_high, seed_low, team_low, width=28):
+            high_str = f"{seed_high}. {team_high}"
+            low_str = f"{seed_low}. {team_low}"
+            return f"│ {high_str:<{width}} │ vs │ {low_str:<{width}} │"
+            
+        def format_bye(seed, team, width=28):
+            team_str = f"{seed}. {team}"
+            return f"│ {team_str:<{width}} │    (BYE)"
+            
+        border = "└" + "─" * 30 + "┘"
+        top_border = "┌" + "─" * 30 + "┐"
+        
+        for conf in ['AFC', 'NFC']:
+            lines.append(f"{conf} PLAYOFF PICTURE")
+            lines.append("═" * 66)
+            
+            seeds = results['current_seeding'].get(conf, [])
+            if len(seeds) >= 7:
+                # 1st Seed
+                lines.append(top_border + "    " + " " * 8)
+                lines.append(format_bye(1, seeds[0], 28))
+                lines.append(border + "    " + " " * 8)
+                lines.append("")
+                
+                # Matchups
+                lines.append(top_border + "    " + top_border)
+                lines.append(format_matchup(2, seeds[1], 7, seeds[6], 28))
+                lines.append(border + "    " + border)
+                lines.append("")
+                
+                lines.append(top_border + "    " + top_border)
+                lines.append(format_matchup(3, seeds[2], 6, seeds[5], 28))
+                lines.append(border + "    " + border)
+                lines.append("")
+                
+                lines.append(top_border + "    " + top_border)
+                lines.append(format_matchup(4, seeds[3], 5, seeds[4], 28))
+                lines.append(border + "    " + border)
+                lines.append("")
+            
+            lines.append("")
+            
+        lines.append("```")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
     
     # Process each conference
     for conf in ['AFC', 'NFC']:
@@ -402,7 +468,7 @@ def main():
     
     parser = argparse.ArgumentParser(description='Scheduled NFL Playoff Predictor')
     parser.add_argument('--force', action='store_true', 
-                       help='Run even if not Tuesday-Thursday')
+                        help='Run even if schedule checks fail')
     parser.add_argument('--simulations', '-n', type=int, default=100000,
                        help='Number of simulations (default: 100000)')
     parser.add_argument('--no-clear-cache', action='store_true',
