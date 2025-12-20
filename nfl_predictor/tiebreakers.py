@@ -635,9 +635,14 @@ class NFLTiebreaker:
         for wins in sorted(by_wins.keys(), reverse=True):
             teams = by_wins[wins]
             if len(teams) > 1:
-                # Use division tiebreaker for teams from same division
-                # or head-to-head for teams from different divisions
-                teams = self.break_division_tie(teams)  # Works for cross-division too
+                # Check if all teams are from same division
+                divisions = set(self.season.teams[t].division for t in teams)
+                if len(divisions) == 1:
+                    # Same division - use division tiebreaker
+                    teams = self.break_division_tie(teams)
+                else:
+                    # Different divisions - use wild card (cross-division) tiebreaker
+                    teams = self.break_wild_card_tie(teams)
             seeded_winners.extend(teams)
         
         # Get wild cards
