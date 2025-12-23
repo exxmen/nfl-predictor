@@ -24,6 +24,27 @@ import pandas as pd
 from .tiebreakers import Game, TEAM_TO_DIVISION
 
 
+# Team name to abbreviation mapping
+TEAM_NAME_TO_ABBREV = {
+    'Arizona Cardinals': 'ARI', 'Atlanta Falcons': 'ATL', 'Baltimore Ravens': 'BAL',
+    'Buffalo Bills': 'BUF', 'Carolina Panthers': 'CAR', 'Chicago Bears': 'CHI',
+    'Cincinnati Bengals': 'CIN', 'Cleveland Browns': 'CLE', 'Dallas Cowboys': 'DAL',
+    'Denver Broncos': 'DEN', 'Detroit Lions': 'DET', 'Green Bay Packers': 'GB',
+    'Houston Texans': 'HOU', 'Indianapolis Colts': 'IND', 'Jacksonville Jaguars': 'JAX',
+    'Kansas City Chiefs': 'KC', 'Los Angeles Chargers': 'LAC', 'Los Angeles Rams': 'LAR',
+    'Las Vegas Raiders': 'LV', 'Miami Dolphins': 'MIA', 'Minnesota Vikings': 'MIN',
+    'New England Patriots': 'NE', 'New Orleans Saints': 'NO', 'New York Giants': 'NYG',
+    'New York Jets': 'NYJ', 'Philadelphia Eagles': 'PHI', 'Pittsburgh Steelers': 'PIT',
+    'San Francisco 49ers': 'SF', 'Seattle Seahawks': 'SEA', 'Tampa Bay Buccaneers': 'TB',
+    'Tennessee Titans': 'TEN', 'Washington Commanders': 'WAS',
+}
+
+
+def get_team_abbrev(team: str) -> str:
+    """Convert team name to abbreviation, or return as-is if already abbrev."""
+    return TEAM_NAME_TO_ABBREV.get(team, team)
+
+
 # Team timezone mapping for travel adjustments
 TEAM_TIMEZONES = {
     # Eastern Time
@@ -89,21 +110,21 @@ class IntangiblesConfig:
     use_weather: bool = False  # Requires API, disabled by default
 
     # Rest days adjustment (points per game)
-    bye_week_advantage: float = 0.3      # Post-2011 CBA: ~0.3, not significant
-    mini_bye_advantage: float = 0.5      # Post-TNF: ~0.5, not significant
-    mnf_disadvantage: float = 0.1        # MNF short week: ~0.1, barely exists
-    long_rest_advantage: float = 1.0     # 10+ days: estimated
+    bye_week_advantage: float = 0.5      # Post-2011 CBA: ~0.3, boost slightly
+    mini_bye_advantage: float = 0.75     # Post-TNF: ~0.5, boost slightly
+    mnf_disadvantage: float = 0.25       # MNF short week: ~0.1, boost slightly
+    long_rest_advantage: float = 0.75    # 10+ days: reduced from 1.0
 
     # Turnover luck regression
     turnover_regression_rate: float = 0.55  # 54.7% of TO margin is luck
-    turnover_points_weight: float = 0.5      # Each TO = ~0.5 points adjustment
+    turnover_points_weight: float = 0.3     # Reduced from 0.5
 
     # Travel adjustment
-    timezone_change_penalty: float = 1.5    # Per 2+ time zone change
-    east_coast_early_game_penalty: float = 1.0  # West team in 1pm ET
+    timezone_change_penalty: float = 1.0    # Reduced from 1.5
+    east_coast_early_game_penalty: float = 0.75  # Reduced from 1.0
 
     # Division familiarity
-    division_underdog_boost: float = 1.5    # Division dogs get small boost
+    division_underdog_boost: float = 0.75   # Reduced from 1.5
 
     # Weather (if enabled)
     bad_weather_scoring_reduction: float = 3.0  # Points reduction in bad weather
@@ -288,8 +309,12 @@ class IntangiblesCalculator:
         if not self.config.use_travel_adjustment:
             return 0.0, ""
 
-        home_tz = TEAM_TIMEZONES.get(home_team, 'CT')
-        away_tz = TEAM_TIMEZONES.get(away_team, 'CT')
+        # Convert to abbreviations for timezone lookup
+        home_abbrev = get_team_abbrev(home_team)
+        away_abbrev = get_team_abbrev(away_team)
+
+        home_tz = TEAM_TIMEZONES.get(home_abbrev, 'CT')
+        away_tz = TEAM_TIMEZONES.get(away_abbrev, 'CT')
 
         # Time zone offset from ET (-2, -1, 0, +1)
         tz_offsets = {'ET': 0, 'CT': -1, 'MT': -2, 'PT': -3}
@@ -299,19 +324,27 @@ class IntangiblesCalculator:
         adjustment = 0.0
         details = []
 
-        # Away team traveling East (less rest, jet lag)
+        # Away team traveling East (West→East = negative tz_diff = home advantage)
+        # Away team traveling West (East→West = positive tz_diff = away advantage)
         tz_diff = away_offset - home_offset
         if abs(tz_diff) >= 2:
-            travel_adj = -self.config.timezone_change_penalty if tz_diff < 0 else self.config.timezone_change_penalty
+            # Negative tz_diff means away team is from West, traveling East = home advantage
+            # Positive tz_diff means away team is from East, traveling West = away advantage
+            if tz_diff < 0:
+                # West team traveling East - home team advantage
+                travel_adj = self.config.timezone_change_penalty
+            else:
+                # East team traveling West - slight away advantage (less impactful)
+                travel_adj = -self.config.timezone_change_penalty * 0.5
             adjustment += travel_adj
-            details.append(f"Timezone change: {tz_diff} zones ({travel_adj:+.1f})")
+            details.append(f"TZ {tz_diff:+d} ({travel_adj:+.1f})")
 
         # West Coast team in 1pm ET game (circadian disadvantage)
         if is_early_et_game and away_tz in ['PT', 'MT'] and home_tz in ['ET', 'CT']:
-            adjustment -= self.config.east_coast_early_game_penalty
-            details.append(f"West team early game (-{self.config.east_coast_early_game_penalty:.1f})")
+            adjustment += self.config.east_coast_early_game_penalty  # Home advantage
+            details.append(f"West early ({self.config.east_coast_early_game_penalty:+.1f})")
 
-        desc = f"Travel: {away_team} @ {home_team}" + (", ".join(details) if details else "")
+        desc = f"Travel: {away_abbrev} @ {home_abbrev}" + (", " + ", ".join(details) if details else "")
         return adjustment, desc
 
     def calculate_division_familiarity(
