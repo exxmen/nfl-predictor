@@ -59,12 +59,13 @@ def clear_caches():
             print(f"🗑️  Cleared {cache_file}")
 
 
-def run_simulation(n_simulations: int = 100000) -> dict:
+def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) -> dict:
     """Run the simulation and return results"""
     import asyncio
     from nfl_predictor.simulation import run_advanced_simulation, build_season_data_from_standings
     from nfl_predictor.scraper import scrape_pfr_schedule_simple, scrape_pfr_standings
     from nfl_predictor.tiebreakers import Game
+    from nfl_predictor.intangibles import IntangiblesConfig
     
     # Get fresh standings
     teams_data = scrape_pfr_standings()
@@ -111,22 +112,30 @@ def run_simulation(n_simulations: int = 100000) -> dict:
         'NFC': tiebreaker.determine_playoff_seeding('NFC')
     }
     
+    # Setup intangibles config
+    intangibles_config = IntangiblesConfig() if use_intangibles else None
+    if use_intangibles:
+        print("🎯 Intangibles enabled (rest, travel, division familiarity)")
+
     results = run_advanced_simulation(
         standings=teams_data,
         completed_games=completed_games,
         remaining_games=remaining_games,
         n_simulations=n_simulations,
         show_progress=True,
-        injury_impacts=injury_impacts
+        injury_impacts=injury_impacts,
+        use_intangibles=use_intangibles,
+        intangibles_config=intangibles_config
     )
-    
+
     return {
         'teams_data': teams_data,
         'results': results,
         'completed_games': len(completed_games),
         'remaining_games': len(remaining_games),
         'injury_impacts': injury_impacts,
-        'current_seeding': current_seeding
+        'current_seeding': current_seeding,
+        'use_intangibles': use_intangibles
     }
 
 
@@ -246,9 +255,15 @@ def format_results_markdown(results: dict, n_simulations: int) -> str:
     
     # Add momentum status
     lines.append("- **Momentum:** 🔥 Enabled (last 4 games vs season average)")
-    
+
+    # Add intangibles status
+    if results.get('use_intangibles'):
+        lines.append("- **Intangibles:** 🎯 Enabled (rest, travel, division familiarity)")
+    else:
+        lines.append("- **Intangibles:** ❌ Disabled")
+
     lines.append("")
-    lines.append("*Probabilities calculated using EPA-based Poisson scoring model with Monte Carlo simulation, momentum adjustments (recent form), injury impacts, and full NFL tiebreaker rules.*")
+    lines.append("*Probabilities calculated using EPA-based Poisson scoring model with Monte Carlo simulation, momentum adjustments (recent form), injury impacts, intangibles, and full NFL tiebreaker rules.*")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -473,6 +488,8 @@ def main():
                        help='Number of simulations (default: 100000)')
     parser.add_argument('--no-clear-cache', action='store_true',
                        help='Do not clear cache before running')
+    parser.add_argument('--no-intangibles', action='store_true',
+                       help='Disable intangibles adjustments (rest, travel, etc.)')
     args = parser.parse_args()
     
     print("🏈 NFL Playoff Predictor - Scheduled Run")
@@ -496,9 +513,10 @@ def main():
         clear_caches()
     
     # Run simulation
+    use_intangibles = not args.no_intangibles
     print(f"\n🚀 Running {args.simulations:,} simulations...")
     try:
-        results = run_simulation(n_simulations=args.simulations)
+        results = run_simulation(n_simulations=args.simulations, use_intangibles=use_intangibles)
     except Exception as e:
         print(f"❌ Simulation failed: {e}")
         import traceback
