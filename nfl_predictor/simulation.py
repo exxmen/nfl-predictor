@@ -619,16 +619,26 @@ def run_advanced_simulation(
         intangibles_calculator = IntangiblesCalculator(intangibles_config)
 
         # Set last game dates from completed games
-        from datetime import date
+        from datetime import date, timedelta
         last_game_dates = {}
+        # Track latest week per team
+        last_game_weeks = {}
         for game in completed_games:
             if game.completed and (game.home_score is not None):
-                # Use week as a proxy for date (simplified)
-                # In production, you'd use actual game dates
-                if game.home_team not in last_game_dates or game.week > last_game_dates[game.home_team]:
-                    last_game_dates[game.home_team] = date.today()  # Placeholder
-                if game.away_team not in last_game_dates or game.week > last_game_dates[game.away_team]:
-                    last_game_dates[game.away_team] = date.today()  # Placeholder
+                if game.home_team not in last_game_weeks or game.week > last_game_weeks[game.home_team]:
+                    last_game_weeks[game.home_team] = game.week
+                if game.away_team not in last_game_weeks or game.week > last_game_weeks[game.away_team]:
+                    last_game_weeks[game.away_team] = game.week
+
+        # Convert weeks to approximate dates (using current date as reference)
+        # Week 1 is roughly early September, calculate days from week number
+        today = date.today()
+        # Approximate: week 1 ~ Sept 1, each week adds 7 days
+        for team, week in last_game_weeks.items():
+            days_from_week_1 = (week - 1) * 7
+            # Approximate date: Sept 1 + days from week 1
+            game_date = date(today.year, 9, 1) + timedelta(days=days_from_week_1)
+            last_game_dates[team] = game_date
 
         intangibles_calculator.set_last_game_dates(last_game_dates)
 
