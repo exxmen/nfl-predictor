@@ -25,6 +25,10 @@ def parse_arguments():
                        help='Disable injury adjustments in simulation')
     parser.add_argument('--no-momentum', action='store_true',
                        help='Disable momentum adjustments in simulation')
+    parser.add_argument('--intangibles', action='store_true',
+                       help='Enable intangibles adjustments (rest days, turnover luck, travel, etc.)')
+    parser.add_argument('--no-intangibles-weather', action='store_true',
+                       help='Disable weather impact in intangibles (requires API)')
     return parser.parse_args()
 
 def main():
@@ -65,14 +69,29 @@ def main():
 
     # Run Simulation
     print(f"\n🚀 Running {args.simulations:,} simulations...")
-    
+
+    # Setup intangibles if requested
+    intangibles_config = None
+    if args.intangibles:
+        from .intangibles import IntangiblesConfig
+        intangibles_config = IntangiblesConfig(
+            use_rest_days=True,
+            use_turnover_luck=True,
+            use_travel_adjustment=True,
+            use_division_familiarity=True,
+            use_weather=not args.no_intangibles_weather
+        )
+
     results = run_advanced_simulation(
         standings=standings,
         completed_games=completed_games,
         remaining_games=remaining_games,
         n_simulations=args.simulations,
         show_progress=not args.no_progress,
-        injury_impacts=injury_impacts
+        injury_impacts=injury_impacts,
+        use_momentum=not args.no_momentum,
+        use_intangibles=args.intangibles,
+        intangibles_config=intangibles_config
     )
     
     # Print Results

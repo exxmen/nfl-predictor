@@ -33,6 +33,13 @@ try:
 except ImportError:
     EPA_AVAILABLE = False
 
+# Try to import intangibles module
+try:
+    from .intangibles import IntangiblesCalculator, IntangiblesConfig
+    INTANGIBLES_AVAILABLE = True
+except ImportError:
+    INTANGIBLES_AVAILABLE = False
+
 
 # Momentum calculation constants
 MIN_GAMES_FOR_MOMENTUM = 3  # Minimum games needed for meaningful momentum calculation
@@ -153,7 +160,7 @@ class EPAGameSimulator:
     MOMENTUM_WEIGHT = 0.10
     MOMENTUM_POINTS_PER_SIGMA = 2.0  # Points adjustment per standard deviation
     
-    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None, injury_impacts: Optional[Dict[str, Dict[str, float]]] = None, use_momentum: bool = True, game_momentum: Optional[Dict[str, Dict[str, float]]] = None, prefer_game_momentum: bool = False):
+    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None, injury_impacts: Optional[Dict[str, Dict[str, float]]] = None, use_momentum: bool = True, game_momentum: Optional[Dict[str, Dict[str, float]]] = None, prefer_game_momentum: bool = False, intangibles_config: Optional[IntangiblesConfig] = None, intangibles_calculator: Optional['IntangiblesCalculator'] = None):
         """
         Initialize EPA-based simulator.
 
@@ -164,6 +171,8 @@ class EPAGameSimulator:
             use_momentum: Whether to apply momentum adjustments (default: True)
             game_momentum: Dict of team -> momentum from completed games
             prefer_game_momentum: If True, prefer game momentum over EPA momentum (for current season)
+            intangibles_config: Configuration for intangibles adjustments
+            intangibles_calculator: Pre-configured IntangiblesCalculator instance
         """
         self.epa_df = epa_df
         self.season_data = season_data
@@ -171,6 +180,8 @@ class EPAGameSimulator:
         self.use_momentum = use_momentum
         self.game_momentum = game_momentum or {}
         self.prefer_game_momentum = prefer_game_momentum  # True for current season
+        self.intangibles_config = intangibles_config
+        self.intangibles_calculator = intangibles_calculator
 
         # Build team lookup if EPA data available
         if epa_df is not None:
@@ -306,24 +317,97 @@ class EPAGameSimulator:
         if is_home:
             expected += self.HOME_ADVANTAGE
 
+        # Apply intangibles adjustments (if available)
+        # Note: Intangibles are applied per-game, not per-team
+        # The game simulation will call this with additional intangibles context
+        # For now, we apply intangibles at the game level in simulate_game()
+
         # Ensure minimum of 7 (a touchdown) - Poisson needs positive lambda
         return max(7.0, expected)
+
+    def apply_intangibles_adjustment(
+        self,
+        home_team: str,
+        away_team: str,
+        home_lambda: float,
+        away_lambda: float,
+        game_data: Optional[Dict] = None
+    ) -> Tuple[float, float]:
+        """
+        Apply intangibles adjustments to expected scores.
+
+        Args:
+            home_team: Home team abbreviation
+            away_team: Away team abbreviation
+            home_lambda: Home team's expected score (pre-adjustment)
+            away_lambda: Away team's expected score (pre-adjustment)
+            game_data: Optional dict with game context (date, bye teams, etc.)
+
+        Returns:
+            Tuple of (adjusted_home_lambda, adjusted_away_lambda)
+        """
+        if not self.intangibles_calculator or not self.intangibles_config:
+            return home_lambda, away_lambda
+
+        game_data = game_data or {}
+        from datetime import date
+
+        # Calculate total intangibles adjustment
+        adjustments = self.intangibles_calculator.calculate_total_intangibles(
+            home_team=home_team,
+            away_team=away_team,
+            game_date=game_data.get('date', date.today()),
+            bye_teams=game_data.get('bye_teams', set()),
+            is_thursday_night=game_data.get('is_thursday_night', False),
+            is_monday_night=game_data.get('is_monday_night', False),
+            is_early_et_game=game_data.get('is_early_et_game', False),
+            home_spread=game_data.get('home_spread'),
+            weather_data=game_data.get('weather_data')
+        )
+
+        # Apply point adjustment (positive = home advantage)
+        total_adj = adjustments['total_adjustment']
+
+        # Apply adjustment to home and away scores
+        # If adjustment is positive, home gains, away loses (relative)
+        # We split the adjustment and add/subtract from each team
+        home_lambda += total_adj * 0.5
+        away_lambda -= total_adj * 0.5
+
+        # Apply weather scaling (reduces both teams' scoring)
+        weather_scale = adjustments['weather_scaling']
+        if weather_scale < 1.0:
+            home_lambda *= weather_scale
+            away_lambda *= weather_scale
+
+        return max(7.0, home_lambda), max(7.0, away_lambda)
     
-    def simulate_game(self, home_team: str, away_team: str) -> Tuple[int, int]:
+    def simulate_game(self, home_team: str, away_team: str, game_data: Optional[Dict] = None) -> Tuple[int, int]:
         """
         Simulate a single game using Poisson scoring model.
-        
+
+        Args:
+            home_team: Home team abbreviation
+            away_team: Away team abbreviation
+            game_data: Optional dict with game context for intangibles
+
         Returns:
             Tuple of (home_score, away_score)
         """
         # Calculate expected scores
         home_lambda = self.calculate_expected_score(home_team, away_team, is_home=True)
         away_lambda = self.calculate_expected_score(away_team, home_team, is_home=False)
-        
+
+        # Apply intangibles adjustments
+        if self.intangibles_calculator:
+            home_lambda, away_lambda = self.apply_intangibles_adjustment(
+                home_team, away_team, home_lambda, away_lambda, game_data
+            )
+
         # Sample from Poisson distributions
         home_score = poisson.rvs(home_lambda)
         away_score = poisson.rvs(away_lambda)
-        
+
         # Handle ties (rare in NFL, ~1% of games)
         # Simulate OT with 50/50 coinflip if tied
         if home_score == away_score:
@@ -333,7 +417,7 @@ class EPAGameSimulator:
                 home_score += 3  # Home team wins with FG
             else:
                 away_score += 3
-        
+
         return int(home_score), int(away_score)
     
     def get_win_probability(self, home_team: str, away_team: str, n_sims: int = 1000) -> dict:
@@ -472,11 +556,13 @@ def run_advanced_simulation(
     use_epa: bool = True,
     season: int = 2025,
     injury_impacts: Optional[Dict[str, Dict[str, float]]] = None,
-    use_momentum: bool = True
+    use_momentum: bool = True,
+    use_intangibles: bool = False,
+    intangibles_config: Optional[IntangiblesConfig] = None
 ) -> Dict[str, Dict]:
     """
     Run Monte Carlo simulation with real NFL tiebreakers.
-    
+
     Args:
         standings: Current standings data
         completed_games: Completed games this season
@@ -487,7 +573,9 @@ def run_advanced_simulation(
         season: NFL season year (for loading correct EPA data)
         injury_impacts: Dict of team -> injury impact from player_impact.py
         use_momentum: Whether to apply momentum adjustments (default: True)
-    
+        use_intangibles: Whether to apply intangibles adjustments (default: False)
+        intangibles_config: Configuration for intangibles adjustments
+
     Returns:
         Dictionary with simulation results for each team
     """
@@ -523,7 +611,42 @@ def run_advanced_simulation(
         game_momentum = calculate_game_momentum(completed_games, n_recent=4)
         if game_momentum:
             print(f"📈 Calculated momentum from {len(game_momentum)} teams' recent games")
-    
+
+    # Setup intangibles calculator if requested
+    intangibles_calculator = None
+    if use_intangibles and INTANGIBLES_AVAILABLE:
+        intangibles_config = intangibles_config or IntangiblesConfig()
+        intangibles_calculator = IntangiblesCalculator(intangibles_config)
+
+        # Set last game dates from completed games
+        from datetime import date
+        last_game_dates = {}
+        for game in completed_games:
+            if game.completed and (game.home_score is not None):
+                # Use week as a proxy for date (simplified)
+                # In production, you'd use actual game dates
+                if game.home_team not in last_game_dates or game.week > last_game_dates[game.home_team]:
+                    last_game_dates[game.home_team] = date.today()  # Placeholder
+                if game.away_team not in last_game_dates or game.week > last_game_dates[game.away_team]:
+                    last_game_dates[game.away_team] = date.today()  # Placeholder
+
+        intangibles_calculator.set_last_game_dates(last_game_dates)
+
+        # Set turnover margins from standings (if available)
+        turnover_margin = {}
+        for team_data in standings:
+            name = team_data['name']
+            # Use point differential as proxy for turnover margin
+            pf = team_data.get('pf', 0)
+            pa = team_data.get('pa', 0)
+            # Rough estimate: 1 turnover = ~4 points, so convert point diff to turnover estimate
+            diff = (pf - pa) / team_data.get('w', 1) if team_data.get('w', 0) > 0 else 0
+            turnover_margin[name] = diff / 4  # Rough estimate
+
+        intangibles_calculator.set_team_turnover_margin(turnover_margin)
+
+        print(f"📊 Intangibles enabled: rest days, turnover luck, travel, division")
+
     # Initialize results tracking
     results: Dict[str, Dict] = {}
     for team_name in base_season.teams.keys():
@@ -539,12 +662,14 @@ def run_advanced_simulation(
     # Create simulator - use EPA if available, with game-based momentum for current season
     if epa_df is not None:
         simulator = EPAGameSimulator(
-            epa_df=epa_df, 
-            season_data=base_season, 
-            injury_impacts=injury_impacts, 
+            epa_df=epa_df,
+            season_data=base_season,
+            injury_impacts=injury_impacts,
             use_momentum=use_momentum,
             game_momentum=game_momentum,
-            prefer_game_momentum=prefer_game_momentum
+            prefer_game_momentum=prefer_game_momentum,
+            intangibles_config=intangibles_config,
+            intangibles_calculator=intangibles_calculator
         )
         if simulator.has_momentum and use_momentum:
             if is_current_season and game_momentum:
