@@ -19,6 +19,7 @@ Updated automatically via GitHub Actions every Tuesday and Friday during the NFL
 - 🚀 **Fast HTTP Scraping**: Gets standings and game data from Pro-Football-Reference (no browser needed)
 - 📅 **Smart Caching**: Week-based cache invalidation (refreshes when new NFL week starts)
 - ⚙️ **GitHub Actions**: Automated runs update a public Gist with latest predictions
+- 📈 **Intangibles**: Rest days, travel/timezone, turnover luck regression, division familiarity
 
 ## Quick Start
 
@@ -30,6 +31,24 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone https://github.com/exxmen/nfl-predictor.git
 cd nfl-predictor
 uv run python main.py
+```
+## Intangibles
+
+The simulator accounts for non-statistical factors that affect game outcomes:
+
+| Factor | Effect | Source |
+|--------|--------|--------|
+| Bye Week | +0.5 ppg | Frontiers Behavioral Economics 2024 |
+| Mini-bye (post-TNF) | +0.75 ppg | Frontiers Behavioral Economics 2024 |
+| West→East Travel | +1.0 ppg (home advantage) | Various studies |
+| Early ET Game | +0.75 ppg (vs West Coast team) | Various studies |
+| Turnover Luck | 54.7% regression rate | Harvard Sports Analysis 2014 |
+| Division Underdog | +0.75 ppg | Conventional wisdom |
+
+Intangibles are enabled by default. To disable:
+
+```bash
+nfl-predict --no-intangibles
 ```
 
 ## Usage
