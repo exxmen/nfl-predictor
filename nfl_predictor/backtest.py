@@ -235,44 +235,70 @@ class NFLBacktester:
     def get_remaining_games(self, schedule: pd.DataFrame, from_week: int) -> List[Game]:
         """Get games from a specific week onwards (using full team names)."""
         remaining = schedule[schedule['week'] > from_week]
-        
+
         games = []
         for _, row in remaining.iterrows():
             home_full = ABBREV_TO_FULL.get(row['home_team'], row['home_team'])
             away_full = ABBREV_TO_FULL.get(row['away_team'], row['away_team'])
+
+            # Determine if Thursday/Monday night from gametime and weekday
+            is_thursday = row['weekday'] == 'Thu' and row['gametime'] == '20:15'
+            is_monday = row['weekday'] == 'Mon' and row['gametime'] == '20:15'
+
             games.append(Game(
                 week=int(row['week']),
                 home_team=home_full,
                 away_team=away_full,
                 home_score=None,
                 away_score=None,
-                completed=False
+                completed=False,
+                gameday=str(row['gameday']),
+                gametime=str(row['gametime']),
+                home_rest=int(row['home_rest']) if pd.notna(row['home_rest']) else None,
+                away_rest=int(row['away_rest']) if pd.notna(row['away_rest']) else None,
+                is_thursday_night=is_thursday,
+                is_monday_night=is_monday,
+                is_division=bool(row['div_game']) if pd.notna(row['div_game']) else False,
+                temp=int(row['temp']) if pd.notna(row['temp']) else None,
+                wind=float(row['wind']) if pd.notna(row['wind']) else None
             ))
-        
+
         return games
-    
+
     def get_completed_games(self, schedule: pd.DataFrame, up_to_week: int) -> List[Game]:
         """Get completed games up to a specific week (using full team names)."""
         completed = schedule[
-            (schedule['week'] <= up_to_week) & 
+            (schedule['week'] <= up_to_week) &
             (schedule['home_score'].notna())
         ]
-        
+
         games = []
         for _, row in completed.iterrows():
             home_full = ABBREV_TO_FULL.get(row['home_team'], row['home_team'])
             away_full = ABBREV_TO_FULL.get(row['away_team'], row['away_team'])
+
+            # Determine if Thursday/Monday night from gametime and weekday
+            is_thursday = row['weekday'] == 'Thu' and row['gametime'] == '20:15'
+            is_monday = row['weekday'] == 'Mon' and row['gametime'] == '20:15'
+
             games.append(Game(
                 week=int(row['week']),
                 home_team=home_full,
                 away_team=away_full,
                 home_score=int(row['home_score']),
                 away_score=int(row['away_score']),
-                completed=True
+                completed=True,
+                gameday=str(row['gameday']),
+                gametime=str(row['gametime']),
+                home_rest=int(row['home_rest']) if pd.notna(row['home_rest']) else None,
+                away_rest=int(row['away_rest']) if pd.notna(row['away_rest']) else None,
+                is_thursday_night=is_thursday,
+                is_monday_night=is_monday,
+                is_division=bool(row['div_game']) if pd.notna(row['div_game']) else False,
+                temp=int(row['temp']) if pd.notna(row['temp']) else None,
+                wind=float(row['wind']) if pd.notna(row['wind']) else None
             ))
-        
-        return games
-        
+
         return games
     
     def simulate_from_week(

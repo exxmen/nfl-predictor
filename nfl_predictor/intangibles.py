@@ -138,10 +138,21 @@ class IntangiblesCalculator:
         game_date: date,
         bye_teams: Optional[set] = None,
         is_thursday_night: bool = False,
-        is_monday_night: bool = False
+        is_monday_night: bool = False,
+        home_rest: Optional[int] = None,
+        away_rest: Optional[int] = None
     ) -> Tuple[float, str]:
         """
         Calculate rest advantage in points for both teams.
+
+        Args:
+            home_team, away_team: Team abbreviations
+            game_date: Date of the game
+            bye_teams: Set of teams on bye
+            is_thursday_night: If this is a Thursday night game
+            is_monday_night: If this is a Monday night game
+            home_rest: Actual rest days for home team (from schedule)
+            away_rest: Actual rest days for away team (from schedule)
 
         Returns:
             Tuple of (net_advantage, description)
@@ -158,9 +169,14 @@ class IntangiblesCalculator:
 
         bye_teams = bye_teams or set()
 
-        # Calculate rest days for each team
-        home_rest = self._get_rest_days(home_team, game_date, bye_teams)
-        away_rest = self._get_rest_days(away_team, game_date, bye_teams)
+        # Use actual rest days from schedule if available
+        if home_rest is not None and away_rest is not None:
+            # Use the provided rest days directly
+            pass
+        else:
+            # Fallback to calculation from last game dates
+            home_rest = self._get_rest_days(home_team, game_date, bye_teams)
+            away_rest = self._get_rest_days(away_team, game_date, bye_teams)
 
         rest_diff = home_rest - away_rest
 
@@ -409,11 +425,27 @@ class IntangiblesCalculator:
         is_thursday_night: bool = False,
         is_monday_night: bool = False,
         is_early_et_game: bool = False,
+        is_division: bool = False,
         home_spread: Optional[float] = None,
-        weather_data: Optional[Dict] = None
+        weather_data: Optional[Dict] = None,
+        home_rest: Optional[int] = None,
+        away_rest: Optional[int] = None
     ) -> Dict[str, any]:
         """
         Calculate all intangible adjustments for a game.
+
+        Args:
+            home_team, away_team: Team abbreviations
+            game_date: Date of the game
+            bye_teams: Set of teams on bye
+            is_thursday_night: If this is a Thursday night game
+            is_monday_night: If this is a Monday night game
+            is_early_et_game: If this is an early ET game (1pm or 4:05pm)
+            is_division: If this is a division game
+            home_spread: Point spread (home team perspective)
+            weather_data: Dict with temp, wind, precip
+            home_rest: Actual rest days for home team
+            away_rest: Actual rest days for away team
 
         Returns:
             Dict with point adjustments and weather scaling factor
@@ -428,9 +460,10 @@ class IntangiblesCalculator:
             'descriptions': []
         }
 
-        # Rest days
+        # Rest days (use actual rest from schedule if available)
         rest_adj, rest_desc = self.calculate_rest_advantage(
-            home_team, away_team, game_date, bye_teams, is_thursday_night, is_monday_night
+            home_team, away_team, game_date, bye_teams,
+            is_thursday_night, is_monday_night, home_rest, away_rest
         )
         adjustments['rest_advantage'] = rest_adj
         adjustments['descriptions'].append(rest_desc)
@@ -447,12 +480,21 @@ class IntangiblesCalculator:
         adjustments['travel_adjustment'] = travel_adj
         adjustments['descriptions'].append(travel_desc)
 
-        # Division familiarity
-        div_adj, div_desc = self.calculate_division_familiarity(
-            home_team, away_team, home_spread
-        )
-        adjustments['division_familiarity'] = div_adj
-        adjustments['descriptions'].append(div_desc)
+        # Division familiarity (use is_division flag if available)
+        if is_division:
+            # Only apply division underdog boost if it's a division game
+            div_adj, div_desc = self.calculate_division_familiarity(
+                home_team, away_team, home_spread
+            )
+            adjustments['division_familiarity'] = div_adj
+            adjustments['descriptions'].append(div_desc)
+        else:
+            # Check division from team mapping
+            div_adj, div_desc = self.calculate_division_familiarity(
+                home_team, away_team, home_spread
+            )
+            adjustments['division_familiarity'] = div_adj
+            adjustments['descriptions'].append(div_desc)
 
         # Weather (scaling factor, not point adjustment)
         weather_scale, weather_desc = self.calculate_weather_adjustment(

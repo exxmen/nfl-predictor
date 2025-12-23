@@ -341,7 +341,7 @@ class EPAGameSimulator:
             away_team: Away team abbreviation
             home_lambda: Home team's expected score (pre-adjustment)
             away_lambda: Away team's expected score (pre-adjustment)
-            game_data: Optional dict with game context (date, bye teams, etc.)
+            game_data: Optional dict with game context (date, rest, flags, etc.)
 
         Returns:
             Tuple of (adjusted_home_lambda, adjusted_away_lambda)
@@ -361,8 +361,11 @@ class EPAGameSimulator:
             is_thursday_night=game_data.get('is_thursday_night', False),
             is_monday_night=game_data.get('is_monday_night', False),
             is_early_et_game=game_data.get('is_early_et_game', False),
+            is_division=game_data.get('is_division', False),
             home_spread=game_data.get('home_spread'),
-            weather_data=game_data.get('weather_data')
+            weather_data=game_data.get('weather_data'),
+            home_rest=game_data.get('home_rest'),
+            away_rest=game_data.get('away_rest')
         )
 
         # Apply point adjustment (positive = home advantage)
@@ -618,30 +621,6 @@ def run_advanced_simulation(
         intangibles_config = intangibles_config or IntangiblesConfig()
         intangibles_calculator = IntangiblesCalculator(intangibles_config)
 
-        # Set last game dates from completed games
-        from datetime import date, timedelta
-        last_game_dates = {}
-        # Track latest week per team
-        last_game_weeks = {}
-        for game in completed_games:
-            if game.completed and (game.home_score is not None):
-                if game.home_team not in last_game_weeks or game.week > last_game_weeks[game.home_team]:
-                    last_game_weeks[game.home_team] = game.week
-                if game.away_team not in last_game_weeks or game.week > last_game_weeks[game.away_team]:
-                    last_game_weeks[game.away_team] = game.week
-
-        # Convert weeks to approximate dates (using current date as reference)
-        # Week 1 is roughly early September, calculate days from week number
-        today = date.today()
-        # Approximate: week 1 ~ Sept 1, each week adds 7 days
-        for team, week in last_game_weeks.items():
-            days_from_week_1 = (week - 1) * 7
-            # Approximate date: Sept 1 + days from week 1
-            game_date = date(today.year, 9, 1) + timedelta(days=days_from_week_1)
-            last_game_dates[team] = game_date
-
-        intangibles_calculator.set_last_game_dates(last_game_dates)
-
         # Set turnover margins from standings (if available)
         turnover_margin = {}
         for team_data in standings:
@@ -723,13 +702,52 @@ def run_advanced_simulation(
         for game in remaining_games:
             home_team = sim_teams.get(game.home_team)
             away_team = sim_teams.get(game.away_team)
-            
+
             if not home_team or not away_team:
                 continue
-            
-            # Simulate the game using team scoring averages
-            home_score, away_score = simulator.simulate_game(game.home_team, game.away_team)
-            
+
+            # Build game data dict for intangibles
+            from datetime import datetime
+            game_data = {}
+            if game.gameday:
+                try:
+                    game_data['date'] = datetime.strptime(game.gameday, '%Y-%m-%d').date()
+                except:
+                    game_data['date'] = datetime.now().date()
+            else:
+                game_data['date'] = datetime.now().date()
+
+            # Rest days - use actual rest from Game if available
+            if game.home_rest is not None and game.away_rest is not None:
+                game_data['home_rest'] = game.home_rest
+                game_data['away_rest'] = game.away_rest
+
+            # TNF/MNF flags
+            game_data['is_thursday_night'] = game.is_thursday_night
+            game_data['is_monday_night'] = game.is_monday_night
+
+            # Division game
+            game_data['is_division'] = game.is_division
+
+            # Weather
+            if game.temp is not None or game.wind is not None:
+                game_data['weather_data'] = {
+                    'temp': game.temp or 70,
+                    'wind': game.wind or 0
+                }
+
+            # Early ET game (1pm or 4:05pm ET games)
+            if game.gametime:
+                is_early = game.gametime.startswith('13:') or game.gametime.startswith('16:05')
+                game_data['is_early_et_game'] = is_early
+
+            # Simulate the game with intangibles context
+            home_score, away_score = simulator.simulate_game(
+                game.home_team,
+                game.away_team,
+                game_data=game_data
+            )
+
             sim_game = Game(
                 week=game.week,
                 home_team=game.home_team,
