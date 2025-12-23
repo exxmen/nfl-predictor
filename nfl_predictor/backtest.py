@@ -34,8 +34,11 @@ except ImportError:
 try:
     from .simulation import run_advanced_simulation, build_season_data_from_standings
     from .simulation import EPAGameSimulator, EPA_AVAILABLE
+    from .intangibles import IntangiblesConfig
+    INTANGIBLES_AVAILABLE = True
     SIMULATION_AVAILABLE = True
 except ImportError:
+    INTANGIBLES_AVAILABLE = False
     SIMULATION_AVAILABLE = False
 
 
@@ -141,14 +144,18 @@ class NFLBacktester:
         }
     }
     
-    def __init__(self, use_epa: bool = True):
+    def __init__(self, use_epa: bool = True, use_intangibles: bool = False, intangibles_config: Optional[IntangiblesConfig] = None):
         """
         Initialize backtester.
-        
+
         Args:
             use_epa: Whether to use EPA-based model (True) or traditional model (False)
+            use_intangibles: Whether to use intangibles adjustments
+            intangibles_config: Configuration for intangibles adjustments
         """
         self.use_epa = use_epa
+        self.use_intangibles = use_intangibles
+        self.intangibles_config = intangibles_config
         self.results: List[BacktestResult] = []
     
     def fetch_season_data(self, season: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -228,44 +235,70 @@ class NFLBacktester:
     def get_remaining_games(self, schedule: pd.DataFrame, from_week: int) -> List[Game]:
         """Get games from a specific week onwards (using full team names)."""
         remaining = schedule[schedule['week'] > from_week]
-        
+
         games = []
         for _, row in remaining.iterrows():
             home_full = ABBREV_TO_FULL.get(row['home_team'], row['home_team'])
             away_full = ABBREV_TO_FULL.get(row['away_team'], row['away_team'])
+
+            # Determine if Thursday/Monday night from gametime and weekday
+            is_thursday = row['weekday'] == 'Thu' and row['gametime'] == '20:15'
+            is_monday = row['weekday'] == 'Mon' and row['gametime'] == '20:15'
+
             games.append(Game(
                 week=int(row['week']),
                 home_team=home_full,
                 away_team=away_full,
                 home_score=None,
                 away_score=None,
-                completed=False
+                completed=False,
+                gameday=str(row['gameday']),
+                gametime=str(row['gametime']),
+                home_rest=int(row['home_rest']) if pd.notna(row['home_rest']) else None,
+                away_rest=int(row['away_rest']) if pd.notna(row['away_rest']) else None,
+                is_thursday_night=is_thursday,
+                is_monday_night=is_monday,
+                is_division=bool(row['div_game']) if pd.notna(row['div_game']) else False,
+                temp=int(row['temp']) if pd.notna(row['temp']) else None,
+                wind=float(row['wind']) if pd.notna(row['wind']) else None
             ))
-        
+
         return games
-    
+
     def get_completed_games(self, schedule: pd.DataFrame, up_to_week: int) -> List[Game]:
         """Get completed games up to a specific week (using full team names)."""
         completed = schedule[
-            (schedule['week'] <= up_to_week) & 
+            (schedule['week'] <= up_to_week) &
             (schedule['home_score'].notna())
         ]
-        
+
         games = []
         for _, row in completed.iterrows():
             home_full = ABBREV_TO_FULL.get(row['home_team'], row['home_team'])
             away_full = ABBREV_TO_FULL.get(row['away_team'], row['away_team'])
+
+            # Determine if Thursday/Monday night from gametime and weekday
+            is_thursday = row['weekday'] == 'Thu' and row['gametime'] == '20:15'
+            is_monday = row['weekday'] == 'Mon' and row['gametime'] == '20:15'
+
             games.append(Game(
                 week=int(row['week']),
                 home_team=home_full,
                 away_team=away_full,
                 home_score=int(row['home_score']),
                 away_score=int(row['away_score']),
-                completed=True
+                completed=True,
+                gameday=str(row['gameday']),
+                gametime=str(row['gametime']),
+                home_rest=int(row['home_rest']) if pd.notna(row['home_rest']) else None,
+                away_rest=int(row['away_rest']) if pd.notna(row['away_rest']) else None,
+                is_thursday_night=is_thursday,
+                is_monday_night=is_monday,
+                is_division=bool(row['div_game']) if pd.notna(row['div_game']) else False,
+                temp=int(row['temp']) if pd.notna(row['temp']) else None,
+                wind=float(row['wind']) if pd.notna(row['wind']) else None
             ))
-        
-        return games
-        
+
         return games
     
     def simulate_from_week(
@@ -321,7 +354,9 @@ class NFLBacktester:
             show_progress=False,
             use_epa=self.use_epa,
             season=season,
-            injury_impacts=injury_impacts
+            injury_impacts=injury_impacts,
+            use_intangibles=self.use_intangibles,
+            intangibles_config=self.intangibles_config
         )
         
         return results
@@ -546,22 +581,72 @@ class NFLBacktester:
 
 def main():
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Backtest NFL prediction model")
     parser.add_argument("--season", type=int, default=2024, help="Season to backtest")
     parser.add_argument("--week", type=int, default=14, help="Week to simulate from")
     parser.add_argument("--sims", type=int, default=1000, help="Simulations per run")
     parser.add_argument("--compare", action="store_true", help="Compare EPA vs traditional model")
     parser.add_argument("--no-epa", action="store_true", help="Use traditional model only")
+    parser.add_argument("--intangibles", action="store_true", help="Enable intangibles adjustments")
+    parser.add_argument("--compare-intangibles", action="store_true", help="Compare with vs without intangibles")
     args = parser.parse_args()
-    
-    backtester = NFLBacktester(use_epa=not args.no_epa)
-    
-    if args.compare:
+
+    intangibles_config = None
+    if args.intangibles or args.compare_intangibles:
+        intangibles_config = IntangiblesConfig(
+            use_rest_days=True,
+            use_turnover_luck=True,
+            use_travel_adjustment=True,
+            use_division_familiarity=True,
+            use_weather=False  # Disabled for backtest (requires API)
+        )
+
+    backtester = NFLBacktester(
+        use_epa=not args.no_epa,
+        use_intangibles=args.intangibles,
+        intangibles_config=intangibles_config
+    )
+
+    if args.compare_intangibles:
+        # Compare with vs without intangibles
+        print("\n" + "="*60)
+        print("  INTANGIBLES COMPARISON")
+        print("="*60)
+
+        # Without intangibles
+        print("\n🔬 Running backtest WITHOUT intangibles...")
+        backtester.use_intangibles = False
+        result_without = backtester.backtest_season(args.season, args.week, args.sims)
+
+        # With intangibles
+        print("\n🔬 Running backtest WITH intangibles...")
+        backtester.use_intangibles = True
+        result_with = backtester.backtest_season(args.season, args.week, args.sims)
+
+        # Compare
+        print(f"\n{'='*60}")
+        print(f"  INTANGIBLES COMPARISON RESULTS")
+        print(f"{'='*60}")
+        print(f"\n{'Metric':<20} {'Without':>15} {'With':>15} {'Winner':>12}")
+        print("-" * 62)
+
+        # Brier (lower = better)
+        brier_winner = "With" if result_with.brier_score < result_without.brier_score else "Without"
+        print(f"{'Brier Score':<20} {result_without.brier_score:>15.4f} {result_with.brier_score:>15.4f} {brier_winner:>12}")
+
+        # Win accuracy (higher = better)
+        win_winner = "With" if result_with.win_accuracy > result_without.win_accuracy else "Without"
+        print(f"{'Win Accuracy':<20} {result_without.win_accuracy*100:>14.1f}% {result_with.win_accuracy*100:>14.1f}% {win_winner:>12}")
+
+        # Playoff accuracy (higher = better)
+        po_winner = "With" if result_with.playoff_accuracy > result_without.playoff_accuracy else "Without"
+        print(f"{'Playoff Accuracy':<20} {result_without.playoff_accuracy*100:>14.1f}% {result_with.playoff_accuracy*100:>14.1f}% {po_winner:>12}")
+    elif args.compare:
         backtester.compare_models(args.season, args.week, args.sims)
     else:
         backtester.backtest_season(args.season, args.week, args.sims)
-    
+
     backtester.save_results()
 
 

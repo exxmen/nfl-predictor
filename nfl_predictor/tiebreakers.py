@@ -57,7 +57,18 @@ class Game:
     home_score: Optional[int] = None
     away_score: Optional[int] = None
     completed: bool = False
-    
+
+    # Schedule/intangibles data (optional)
+    gameday: Optional[str] = None
+    gametime: Optional[str] = None
+    home_rest: Optional[int] = None
+    away_rest: Optional[int] = None
+    is_thursday_night: bool = False
+    is_monday_night: bool = False
+    is_division: bool = False
+    temp: Optional[int] = None
+    wind: Optional[float] = None
+
     @property
     def winner(self) -> Optional[str]:
         if not self.completed or self.home_score is None or self.away_score is None:
@@ -67,7 +78,7 @@ class Game:
         elif self.away_score > self.home_score:
             return self.away_team
         return None  # Tie
-    
+
     @property
     def loser(self) -> Optional[str]:
         if not self.completed or self.home_score is None or self.away_score is None:
@@ -77,21 +88,28 @@ class Game:
         elif self.away_score < self.home_score:
             return self.away_team
         return None  # Tie
-    
+
     @property
     def is_tie(self) -> bool:
         return self.completed and self.home_score == self.away_score
-    
+
+    @property
+    def rest_differential(self) -> int:
+        """Calculate rest differential (positive = home team has more rest)"""
+        if self.home_rest is not None and self.away_rest is not None:
+            return self.home_rest - self.away_rest
+        return 0
+
     def involves_team(self, team: str) -> bool:
         return team in (self.home_team, self.away_team)
-    
+
     def get_opponent(self, team: str) -> Optional[str]:
         if team == self.home_team:
             return self.away_team
         elif team == self.away_team:
             return self.home_team
         return None
-    
+
     def get_team_score(self, team: str) -> Optional[int]:
         if team == self.home_team:
             return self.home_score
