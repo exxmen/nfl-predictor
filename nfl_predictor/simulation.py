@@ -10,6 +10,7 @@ This module provides the enhanced Monte Carlo simulation using:
 """
 
 import numpy as np
+import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -27,6 +28,8 @@ from .tiebreakers import (
     get_current_nfl_week
 )
 from .team_names import to_full_name
+
+logger = logging.getLogger(__name__)
 
 # Try to import EPA loader (optional enhancement)
 try:
@@ -181,9 +184,13 @@ class EPAGameSimulator:
         self.market_weight = max(0.0, min(1.0, market_weight))
         self.epa_df = epa_df
         self.season_data = season_data
-        self.injury_impacts = injury_impacts or {}
+        # Normalize dict keys to canonical FULL names. Injury/momentum data
+        # sources (ESPN / nfl_data_py) key by abbreviation ("KC") but the
+        # simulation consumes full names, so without this the adjustments
+        # would silently never apply for abbrev-keyed input.
+        self.injury_impacts = self._normalize_team_dict(injury_impacts or {})
         self.use_momentum = use_momentum
-        self.game_momentum = game_momentum or {}
+        self.game_momentum = self._normalize_team_dict(game_momentum or {})
         self.prefer_game_momentum = prefer_game_momentum  # True for current season
         self.intangibles_config = intangibles_config
         self.intangibles_calculator = intangibles_calculator
@@ -220,6 +227,14 @@ class EPAGameSimulator:
         # Determine which momentum source to use
         self.has_momentum = bool(self.game_momentum) if prefer_game_momentum else (self.has_epa_momentum or bool(self.game_momentum))
     
+    @staticmethod
+    def _normalize_team_dict(d: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+        """Re-key a {team: {impact...}} dict from abbreviation to full name."""
+        out = {}
+        for key, val in d.items():
+            out[to_full_name(str(key))] = val
+        return out
+
     def get_team_stats(self, team: str) -> dict:
         """Get EPA stats for a team, with fallback to league average."""
         if team in self.team_epa:
@@ -232,8 +247,8 @@ class EPAGameSimulator:
 
         # Real miss: warn loudly (once per team) instead of silently degrading
         if team not in self._lookup_miss_warned:
-            print(f"⚠️  EPA lookup miss for '{team}' — using league averages "
-                  f"(check team-name normalization in team_names.py)")
+            logger.warning("EPA lookup miss for '%s' — using league averages "
+                           "(check team-name normalization in team_names.py)", team)
             self._lookup_miss_warned.add(team)
 
         # Fallback to league averages
@@ -423,6 +438,11 @@ class EPAGameSimulator:
         intangibles, market spread) — never on simulated season state — so
         they can be precomputed once and reused across all Monte Carlo runs.
         """
+        # Normalize both keys to canonical full names so downstream logic
+        # (EPA, injuries, momentum, intangibles) sees one consistent key form.
+        home_team = to_full_name(home_team)
+        away_team = to_full_name(away_team)
+
         home_lambda = self.calculate_expected_score(home_team, away_team, is_home=True)
         away_lambda = self.calculate_expected_score(away_team, home_team, is_home=False)
 
@@ -790,13 +810,13 @@ def run_advanced_simulation(
             away_scores_mat.append(poisson.rvs(away_l, size=n_simulations).astype(np.int16))
         else:
             # Non-EPA / traditional model: Gaussian (kept consistent with
-            # GameSimulator.simulate_game() so backtest results match)
+            # GameSimulator.simulate_game() which uses int(gauss(..)) truncation)
             std = simulator.score_std_dev
             home_scores_mat.append(
-                np.random.normal(home_l, std, size=n_simulations).clip(min=0).round().astype(np.int16)
+                np.random.normal(home_l, std, size=n_simulations).clip(min=0).astype(np.int16)
             )
             away_scores_mat.append(
-                np.random.normal(away_l, std, size=n_simulations).clip(min=0).round().astype(np.int16)
+                np.random.normal(away_l, std, size=n_simulations).clip(min=0).astype(np.int16)
             )
 
     for sim_idx in iterator:

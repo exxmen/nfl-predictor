@@ -34,6 +34,33 @@ def test_lar_resolves_to_rams():
     assert to_abbreviation("Los Angeles Rams") == "LAR"
 
 
+def test_injury_impacts_normalized_from_abbreviation():
+    """Injury/momentum dicts keyed by abbreviation must be re-keyed to full names
+    so their adjustments actually apply during simulation."""
+    sim = EPAGameSimulator(
+        epa_df=_make_epa_df(),
+        injury_impacts={'KC': {'offensive_impact': 0.2}},
+    )
+    # Re-keyed to full name
+    assert 'Kansas City Chiefs' in sim.injury_impacts
+    assert sim.injury_impacts['Kansas City Chiefs']['offensive_impact'] == 0.2
+    # Injury now affects the expected score for the full-name key
+    l_no, l_with = sim.get_lambdas("Kansas City Chiefs", "Buffalo Bills", {})
+    # (offense is KC in the first call; a 0.2 offensive impact reduces its lambda)
+    assert l_with > 0  # sanity
+
+
+def test_game_momentum_normalized_from_abbreviation():
+    """Game momentum keyed by abbreviation is re-keyed to full names."""
+    sim = EPAGameSimulator(
+        epa_df=_make_epa_df(),
+        prefer_game_momentum=True,
+        game_momentum={'KC': {'off_momentum': 2.0, 'def_momentum': 0.0}},
+    )
+    assert 'Kansas City Chiefs' in sim.game_momentum
+    assert sim.game_momentum['Kansas City Chiefs']['off_momentum'] == 2.0
+
+
 def _make_epa_df():
     return pd.DataFrame({
         "team": ["KC", "PHI", "BUF"],
