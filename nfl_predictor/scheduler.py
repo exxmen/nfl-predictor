@@ -62,10 +62,15 @@ def clear_caches():
 def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) -> dict:
     """Run the simulation and return results"""
     import asyncio
+    from nfl_predictor.config import get_current_season
     from nfl_predictor.simulation import run_advanced_simulation, build_season_data_from_standings
     from nfl_predictor.scraper import scrape_pfr_schedule_simple, scrape_pfr_standings
     from nfl_predictor.tiebreakers import Game
     from nfl_predictor.intangibles import IntangiblesConfig
+
+    # Single source of truth: the active NFL season. Pinned here so schedule,
+    # injuries, EPA, and market spreads all align.
+    season = get_current_season()
     
     # Get fresh standings
     teams_data = scrape_pfr_standings()
@@ -74,7 +79,7 @@ def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) ->
     
     # Get fresh game data
     async def fetch_games():
-        return await scrape_pfr_schedule_simple(season=2025)
+        return await scrape_pfr_schedule_simple(season=season)
     
     completed_games, remaining_games = asyncio.run(fetch_games())
     
@@ -88,8 +93,7 @@ def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) ->
     market_weight = 0.0
     try:
         from nfl_predictor.market import fetch_spreads, attach_spreads_to_games, MARKET_WEIGHT
-        from nfl_predictor.config import get_current_season
-        spreads = fetch_spreads(get_current_season())
+        spreads = fetch_spreads(season)
         attached = attach_spreads_to_games(remaining_games, spreads)
         market_weight = MARKET_WEIGHT if attached > 0 else 0.0
         if attached:
@@ -105,8 +109,8 @@ def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) ->
         from nfl_predictor.injuries import load_injury_data, load_snap_counts, get_current_nfl_week
         from nfl_predictor.player_impact import get_all_team_impacts
         
-        injuries_df = load_injury_data(2025)
-        snap_counts_df = load_snap_counts(2025)
+        injuries_df = load_injury_data(season)
+        snap_counts_df = load_snap_counts(season)
         current_week = get_current_nfl_week()
         injury_impacts = get_all_team_impacts(injuries_df, snap_counts_df, current_week)
         
@@ -139,6 +143,7 @@ def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) ->
         remaining_games=remaining_games,
         n_simulations=n_simulations,
         show_progress=True,
+        season=season,
         injury_impacts=injury_impacts,
         use_intangibles=use_intangibles,
         intangibles_config=intangibles_config,

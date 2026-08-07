@@ -14,11 +14,14 @@ Key metrics:
 import nfl_data_py as nfl
 import pandas as pd
 import numpy as np
+import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from .epa import load_team_epa
 from .tiebreakers import Game, TEAM_TO_CONFERENCE, TEAM_TO_DIVISION
@@ -744,7 +747,9 @@ class NFLBacktester:
     def write_markdown_summary(self, filepath: str = "results/backtest_summary.md") -> str:
         """Write a markdown summary table of all backtest results (and return it)."""
         import os
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        dirname = os.path.dirname(filepath)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
 
         lines = []
         lines.append("# NFL Predictor Backtest Summary\n")

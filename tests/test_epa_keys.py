@@ -27,6 +27,13 @@ def test_to_abbreviation_resolves_both_forms():
     assert to_abbreviation("KC") == "KC"
 
 
+def test_lar_resolves_to_rams():
+    """LAR is the canonical schedule abbreviation; LA is a legacy alias."""
+    assert to_full_name("LAR") == "Los Angeles Rams"
+    assert to_full_name("LA") == "Los Angeles Rams"
+    assert to_abbreviation("Los Angeles Rams") == "LAR"
+
+
 def _make_epa_df():
     return pd.DataFrame({
         "team": ["KC", "PHI", "BUF"],
