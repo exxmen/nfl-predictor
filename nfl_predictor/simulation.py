@@ -648,6 +648,9 @@ def run_advanced_simulation(
         use_momentum: Whether to apply momentum adjustments (default: True)
         use_intangibles: Whether to apply intangibles adjustments (default: False)
         intangibles_config: Configuration for intangibles adjustments
+        market_weight: Blend weight toward closing consensus spreads (0.0 = off).
+            When > 0 and a game has a home_spread, expected scores are blended
+            toward the market-implied scores (see market.py).
 
     Returns:
         Dictionary with simulation results for each team
