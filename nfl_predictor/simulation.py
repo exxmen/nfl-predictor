@@ -240,7 +240,7 @@ class EPAGameSimulator:
         if team in self.team_epa:
             return self.team_epa[team]
 
-        # Last-chance: try normalizing abbreviation -> full name (or vice versa)
+        # Last-chance: normalize abbreviation -> full name for the EPA lookup
         normalized = to_full_name(team)
         if normalized in self.team_epa:
             return self.team_epa[normalized]

@@ -841,7 +841,7 @@ def main():
         print(f"{'Log-loss':<18} {result_plain.log_loss:>12.4f} {result_market.log_loss:>12.4f} {ll_winner:>12}")
         print(f"{'Win accuracy':<18} {result_plain.win_accuracy*100:>11.1f}% {result_market.win_accuracy*100:>11.1f}% {win_winner:>12}")
         print(f"{'ECE (calib)':<18} {result_plain.ece:>12.4f} {result_market.ece:>12.4f}")
-        return
+        # fall through to save_results()/write_markdown_summary() below
     elif args.compare_intangibles:
         # Compare with vs without intangibles
         print("\n" + "="*60)

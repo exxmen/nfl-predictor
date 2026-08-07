@@ -5,8 +5,9 @@ Single source of truth for team abbreviation <-> full-name conversion.
 nfl_data_py / nflverse key teams by ABBREVIATION (KC, PHI), while the
 simulation engine and tiebreakers key teams by FULL NAME
 (Kansas City Chiefs). The EPA loader and the scheduler/scraper therefore
-produce mismatched keys; every consumer should resolve through this module
-so a lookup can never silently miss again.
+produce mismatched keys; every consumer should resolve name forms through
+this module so a lookup can never silently miss again. (Conference/division
+metadata lives in backtest.py and tiebreakers.py.)
 """
 
 # Abbreviation -> full name (32 teams; LA and LAR are both aliases for the Rams)
