@@ -458,19 +458,10 @@ class EPAGameSimulator:
         """
         home_lambda, away_lambda = self.get_lambdas(home_team, away_team, game_data)
 
-        # Sample from Poisson distributions
+        # Sample from Poisson distributions. Ties are left as-is: NFL
+        # regular-season ties are rare but real and must remain ties.
         home_score = poisson.rvs(home_lambda)
         away_score = poisson.rvs(away_lambda)
-
-        # Handle ties (rare in NFL, ~1% of games)
-        # Simulate OT with 50/50 coinflip if tied
-        if home_score == away_score:
-            # In NFL, ~57% of OT games are won by receiving team
-            # But for simplicity, just give slight home advantage
-            if np.random.random() < 0.52:
-                home_score += 3  # Home team wins with FG
-            else:
-                away_score += 3
 
         return int(home_score), int(away_score)
     
@@ -821,13 +812,9 @@ def run_advanced_simulation(
             home_score = int(home_scores_mat[gi][sim_idx])
             away_score = int(away_scores_mat[gi][sim_idx])
 
-            # Handle ties (rare in NFL): resolve OT with slight home edge
-            if home_score == away_score:
-                if np.random.random() < 0.52:
-                    home_score += 3
-                else:
-                    away_score += 3
-
+            # Ties are left as-is: NFL regular-season ties are rare but real
+            # (~1% of games) and must remain ties because they affect win% and
+            # tiebreakers. The tie branch below records them as ties.
             home_team = sim_teams[game.home_team]
             away_team = sim_teams[game.away_team]
 

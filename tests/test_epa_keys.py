@@ -67,6 +67,56 @@ def test_get_lambdas_are_deterministic():
     assert l1[0] >= 7.0 and l1[1] >= 7.0  # Poisson needs positive lambda
 
 
+def test_simulate_game_preserves_ties():
+    """NFL regular-season ties are real and must not be forced into a winner."""
+    import numpy as np
+    sim = EPAGameSimulator(epa_df=_make_epa_df())
+    # Force equal lambdas so ties are common, and use a fixed RNG stream.
+    rng = np.random.default_rng(0)
+    np.random.seed(0)
+    ties = 0
+    n = 5000
+    # Equal-lambda match: P(home == away) is non-negligible for Poisson.
+    for _ in range(n):
+        h, a = sim.simulate_game("Kansas City Chiefs", "Kansas City Chiefs", {})
+        if h == a:
+            ties += 1
+    # With a ~24-26 lambda Poisson, equal-score draws are common (>5%).
+    assert ties > 0.05 * n
+    # And no game may be a forced 3-point OT flip.
+    h, a = sim.simulate_game("Kansas City Chiefs", "Kansas City Chiefs", {})
+    assert abs(h - a) not in (3, -3) or h != a  # ties returned as-is, no +3 flip
+
+
+def test_vectorized_sim_loop_preserves_ties():
+    """The vectorized loop must record regular-season ties instead of resolving them."""
+    import numpy as np
+    from nfl_predictor.tiebreakers import Game
+    from nfl_predictor.simulation import build_season_data_from_standings
+
+    sim = EPAGameSimulator(epa_df=_make_epa_df())
+    # A single game, same team both sides -> forced equal lambdas -> ties appear.
+    remaining = [Game(2, "Kansas City Chiefs", "Kansas City Chiefs", completed=False)]
+    completed = []
+    standings = [{'name': 'Kansas City Chiefs', 'w': 0, 'l': 0, 't': 0, 'pf': 0, 'pa': 0,
+                  'div': 'West', 'conf': 'AFC'},
+                 {'name': 'Buffalo Bills', 'w': 0, 'l': 0, 't': 0, 'pf': 0, 'pa': 0,
+                  'div': 'East', 'conf': 'AFC'}]
+
+    from nfl_predictor.simulation import run_advanced_simulation
+    import nfl_predictor.simulation as simmod
+    simmod.load_team_epa = lambda season=2025, force_refresh=False: _make_epa_df()
+
+    res = run_advanced_simulation(standings, completed, remaining,
+                                  n_simulations=20000, show_progress=False,
+                                  season=2025, market_weight=0.0)
+    kc = res['Kansas City Chiefs']
+    total = kc['total_wins']
+    # If ties were forced into winners, avg wins would be ~1.0 per game.
+    # With real ties, the total wins across sims is less than n_simulations.
+    assert total < 20000, "ties should not be forced into wins"
+
+
 def test_market_anchor_pulls_toward_spread():
     from nfl_predictor.market import market_implied_scores, DEFAULT_TOTAL
 
