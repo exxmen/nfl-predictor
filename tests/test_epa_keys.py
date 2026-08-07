@@ -32,6 +32,8 @@ def test_lar_resolves_to_rams():
     assert to_full_name("LAR") == "Los Angeles Rams"
     assert to_full_name("LA") == "Los Angeles Rams"
     assert to_abbreviation("Los Angeles Rams") == "LAR"
+    # Legacy alias canonicalizes to the schedule/EPA form
+    assert to_abbreviation("LA") == "LAR"
 
 
 def test_injury_impacts_normalized_from_abbreviation():

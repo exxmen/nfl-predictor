@@ -39,9 +39,12 @@ def to_full_name(team: str) -> str:
 
 
 def to_abbreviation(team: str) -> str:
-    """Return the abbreviation for a team key (abbrev or full)."""
-    if team in FULL_TO_ABBREV:
-        return FULL_TO_ABBREV[team]
-    if team in ABBREV_TO_FULL:
-        return team
+    """Return the canonical abbreviation for a team key (abbrev or full).
+
+    Legacy aliases (e.g. "LA" for the Rams) are canonicalized to the
+    schedule/EPA form (LAR) so upstream keys always match.
+    """
+    full = to_full_name(team)
+    if full in FULL_TO_ABBREV:
+        return FULL_TO_ABBREV[full]  # canonical form (LAR, not LA)
     return team
