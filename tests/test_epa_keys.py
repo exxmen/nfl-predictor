@@ -36,6 +36,25 @@ def test_lar_resolves_to_rams():
     assert to_abbreviation("LA") == "LAR"
 
 
+def test_division_underdog_spread_sign_convention():
+    """POSITIVE home_spread = home favored (matches market.py).
+
+    - home_spread > 3 (home favored) -> away is the dog -> home score reduced
+    - home_spread < -3 (away favored) -> home is the dog -> home score boosted
+    """
+    from nfl_predictor.intangibles import IntangiblesCalculator, IntangiblesConfig
+    calc = IntangiblesCalculator(IntangiblesConfig())
+    # KC vs LAC are both AFC West, so this is a division game.
+    home_favored = calc.calculate_division_familiarity(
+        "Kansas City Chiefs", "Los Angeles Chargers", home_spread=7.0)
+    away_favored = calc.calculate_division_familiarity(
+        "Kansas City Chiefs", "Los Angeles Chargers", home_spread=-7.0)
+    # When home is favored, home score is reduced (return negative).
+    assert home_favored[0] < 0
+    # When away is favored, home score is boosted (return positive).
+    assert away_favored[0] > 0
+
+
 def test_injury_impacts_normalized_from_abbreviation():
     """Injury/momentum dicts keyed by abbreviation must be re-keyed to full names
     so their adjustments actually apply during simulation."""

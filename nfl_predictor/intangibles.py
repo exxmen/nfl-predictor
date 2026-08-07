@@ -374,12 +374,13 @@ class IntangiblesCalculator:
         if home_div != away_div:
             return 0.0, ""
 
-        # Division game - check if there's a clear underdog
+        # Division game - check if there's a clear underdog.
+        # Convention: POSITIVE home_spread = home team favored (matches market.py).
         if home_spread is not None:
-            if home_spread < -3:  # Home team favored by 3+
-                # Away team is underdog, give them a boost
+            if home_spread > 3:  # Home team favored by 3+ -> away is the dog
+                # Away team is underdog, give them a boost (reduces home)
                 return -self.config.division_underdog_boost, f"Division rival dog (+{self.config.division_underdog_boost:.1f})"
-            elif home_spread > 3:  # Away team favored
+            elif home_spread < -3:  # Away team favored -> home is the dog
                 # Home team is underdog, give them a boost
                 return self.config.division_underdog_boost, f"Division rival dog (+{self.config.division_underdog_boost:.1f})"
 
