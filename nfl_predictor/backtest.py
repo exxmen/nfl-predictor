@@ -527,7 +527,11 @@ class NFLBacktester:
                 continue
             y = 1.0 if pred['home_won'] else 0.0
             brier_terms.append((p - y) ** 2)
-            if (p > 0.5 and y == 1.0) or (p < 0.5 and y == 0.0):
+            if p == 0.5:
+                # Pick'em: no favorite, so a correct/incorrect call is undefined.
+                # Credit half so accuracy isn't biased downward by their presence.
+                correct += 0.5
+            elif (p > 0.5 and y == 1.0) or (p < 0.5 and y == 0.0):
                 correct += 1
             n += 1
         return {

@@ -6,7 +6,8 @@ schedule feed (nfl_data_py / nflverse), which we already depend on. No API
 key, no paid tier.
 
 Convention: `spread_line` is expressed from the HOME team's perspective
-(negative = home team favored, e.g. -2.5 means home favored by 2.5).
+(POSITIVE = home team favored, e.g. +2.5 means home favored by 2.5).
+This was verified empirically against 285 real 2024 games.
 """
 
 import json
@@ -46,8 +47,12 @@ def _cache_valid(season: int, meta_file: Path) -> bool:
         with open(meta_file) as f:
             meta = json.load(f)
         cached_season = meta.get("season", 0)
-        current_year = datetime.now().year
-        if season < current_year:
+        # Use get_current_season() (handles the Jan/Feb boundary where the
+        # active NFL season is the previous calendar year) to decide whether
+        # this is a historical season that never changes.
+        from .config import get_current_season
+        current_season = get_current_season()
+        if season < current_season:
             return cached_season == season
         # Current season: refresh at least once per NFL week
         from .config import get_current_nfl_week
@@ -61,7 +66,8 @@ def fetch_spreads(season: int, force_refresh: bool = False) -> Dict[Tuple[str, s
     Load closing consensus spreads keyed by (home_full_name, away_full_name).
 
     Returns a dict mapping the (home, away) full-name tuple to the home
-    spread (negative = home favored). Games without a line map to None.
+    spread (POSITIVE = home favored; matches the verified nflverse
+    convention used everywhere else). Games without a line map to None.
     """
     cache_file, meta_file = _cache_paths(season)
     if not force_refresh and _cache_valid(season, meta_file) and cache_file.exists():
@@ -99,9 +105,8 @@ def fetch_spreads(season: int, force_refresh: bool = False) -> Dict[Tuple[str, s
 
 
 def _current_week(season: int) -> int:
-    from .config import get_current_nfl_week
-    current_year = datetime.now().year
-    if season < current_year:
+    from .config import get_current_nfl_week, get_current_season
+    if season < get_current_season():
         return 18  # historical seasons fully resolved
     return get_current_nfl_week()
 

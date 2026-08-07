@@ -29,9 +29,9 @@ jobs:
 
   backtest:
     runs-on: ubuntu-latest
-    # Backtest hits the network (nfl_data_py) and is slow; run manually
-    # or on a schedule, not on every PR.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    # Backtest hits the network (nfl_data_py) and is slow; run manually,
+    # not on every PR.
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

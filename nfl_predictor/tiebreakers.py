@@ -68,7 +68,7 @@ class Game:
     is_division: bool = False
     temp: Optional[int] = None
     wind: Optional[float] = None
-    home_spread: Optional[float] = None  # closing consensus spread (negative = home favored)
+    home_spread: Optional[float] = None  # closing consensus spread (POSITIVE = home favored)
 
     @property
     def winner(self) -> Optional[str]:

@@ -99,3 +99,14 @@ def test_market_benchmark_all_missing():
     assert mkt["market_brier"] is None
     assert mkt["market_win_accuracy"] is None
     assert mkt["n_with_spread"] == 0
+
+
+def test_market_benchmark_pickem_counts_half_credit():
+    bt = NFLBacktester()
+    # spread=0 -> pick'em (p=0.5): credited 0.5, not a silent miss
+    preds = [{"home_win_prob": 0.5, "home_won": True, "home_spread": 0.0},
+             {"home_win_prob": 0.8, "home_won": True, "home_spread": 4.0}]
+    mkt = bt.calculate_market_benchmark(preds)
+    assert mkt["n_with_spread"] == 2
+    # 0.5 (pick'em) + 1.0 (correct favorite) = 1.5 / 2 = 0.75
+    assert mkt["market_win_accuracy"] == pytest.approx(0.75)

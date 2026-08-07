@@ -88,7 +88,8 @@ def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) ->
     market_weight = 0.0
     try:
         from nfl_predictor.market import fetch_spreads, attach_spreads_to_games, MARKET_WEIGHT
-        spreads = fetch_spreads(2025)
+        from nfl_predictor.config import get_current_season
+        spreads = fetch_spreads(get_current_season())
         attached = attach_spreads_to_games(remaining_games, spreads)
         market_weight = MARKET_WEIGHT if attached > 0 else 0.0
         if attached:
