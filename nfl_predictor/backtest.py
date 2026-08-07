@@ -402,10 +402,17 @@ class NFLBacktester:
                 from .team_names import to_full_name
                 teams_in_post = set(post['home_team'].tolist() + post['away_team'].tolist())
                 afc, nfc = [], []
+                skipped = 0
                 for abbr in sorted(teams_in_post):
                     conf = ABBREV_TO_CONF.get(abbr)
+                    if conf not in ('AFC', 'NFC'):
+                        # Unknown abbreviation: skip rather than mis-bucket it
+                        skipped += 1
+                        continue
                     full = to_full_name(abbr)
                     (afc if conf == 'AFC' else nfc).append(full)
+                if skipped:
+                    logger.warning("get_actual_playoffs: skipped %d unknown team abbreviation(s)", skipped)
                 if afc and nfc:
                     return {'AFC': afc, 'NFC': nfc}
         if hardcoded is not None:
@@ -811,7 +818,9 @@ def main():
         result_plain = backtester.backtest_season(args.season, args.week, args.sims)
 
         print("\n🔬 Running backtest WITH market anchoring...")
-        backtester.market_weight = 0.30
+        # Use the user's --market W value (default 0.30) as the comparison weight
+        anchored_weight = args.market if args.market > 0 else 0.30
+        backtester.market_weight = anchored_weight
         result_market = backtester.backtest_season(args.season, args.week, args.sims)
 
         print(f"\n{'='*60}")
@@ -819,6 +828,7 @@ def main():
         print(f"{'='*60}")
         print(f"\n{'Metric':<18} {'Pure EPA':>12} {'Anchored':>12} {'Winner':>12}")
         print("-" * 54)
+        print(f"  (anchored weight: {anchored_weight:.2f})")
         brier_winner = "Anchored" if result_market.brier_score < result_plain.brier_score else "Pure EPA"
         ll_winner = "Anchored" if result_market.log_loss < result_plain.log_loss else "Pure EPA"
         win_winner = "Anchored" if result_market.win_accuracy > result_plain.win_accuracy else "Pure EPA"

@@ -471,8 +471,8 @@ class EPAGameSimulator:
         Calculate win probability for a matchup via simulation.
 
         Args:
-            home_team: Home team abbreviation
-            away_team: Away team abbreviation
+            home_team: Home team (full name or abbreviation; EPA is indexed by both)
+            away_team: Away team (full name or abbreviation)
             n_sims: Number of simulations
             game_data: Optional dict with game context (home_spread, etc.).
                 When a spread is present and market_weight > 0, the market
@@ -777,9 +777,11 @@ def run_advanced_simulation(
 
     # Vectorized Poisson draws: one array of size n_simulations per game.
     # (Vectorized scipy draws are ~10-50x faster than n_games*n_sims scalar calls.)
-    home_scores_mat = [poisson.rvs(home_l, size=n_simulations)
+    # Cast to int16: NFL scores fit comfortably (max real ~70), which cuts
+    # memory ~4x vs the default int64 (important early-season / high-n_sims runs).
+    home_scores_mat = [poisson.rvs(home_l, size=n_simulations).astype(np.int16)
                        for _, _, _, home_l, _ in game_specs]
-    away_scores_mat = [poisson.rvs(away_l, size=n_simulations)
+    away_scores_mat = [poisson.rvs(away_l, size=n_simulations).astype(np.int16)
                        for _, _, _, _, away_l in game_specs]
 
     for sim_idx in iterator:
