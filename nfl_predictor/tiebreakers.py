@@ -68,6 +68,7 @@ class Game:
     is_division: bool = False
     temp: Optional[int] = None
     wind: Optional[float] = None
+    home_spread: Optional[float] = None  # closing consensus spread (negative = home favored)
 
     @property
     def winner(self) -> Optional[str]:
@@ -682,31 +683,36 @@ class GameSimulator:
         self.league_avg_score = 22.0
         self.score_std_dev = 8.0
     
-    def simulate_game(self, home_team: str, away_team: str) -> Tuple[int, int]:
-        """
-        Simulate a single game between two teams.
-        Uses team's scoring average adjusted for opponent's defensive average.
-        Returns (home_score, away_score)
-        """
+    def get_lambdas(self, home_team: str, away_team: str, game_data=None) -> Tuple[float, float]:
+        """Compute (home, away) expected scores without sampling.
+        Mirror of EPAGameSimulator.get_lambdas so the vectorized simulation
+        loop works uniformly for the non-EPA fallback too."""
         home_stats = self.season.teams.get(home_team)
         away_stats = self.season.teams.get(away_team)
-        
-        # Calculate expected scores
+
         if home_stats and home_stats.games_played > 0:
             home_off = home_stats.avg_points_for
             home_def = home_stats.avg_points_against
         else:
             home_off = home_def = self.league_avg_score
-        
+
         if away_stats and away_stats.games_played > 0:
             away_off = away_stats.avg_points_for
             away_def = away_stats.avg_points_against
         else:
             away_off = away_def = self.league_avg_score
-        
-        # Expected score = average of (team's offense vs league avg defense) and (league avg offense vs opponent defense)
-        home_expected = (home_off + (self.league_avg_score * 2 - away_def)) / 2 + 2.5  # Home field advantage
+
+        home_expected = (home_off + (self.league_avg_score * 2 - away_def)) / 2 + 2.5
         away_expected = (away_off + (self.league_avg_score * 2 - home_def)) / 2
+        return max(7.0, home_expected), max(7.0, away_expected)
+
+    def simulate_game(self, home_team: str, away_team: str, game_data=None) -> Tuple[int, int]:
+        """
+        Simulate a single game between two teams.
+        Uses team's scoring average adjusted for opponent's defensive average.
+        Returns (home_score, away_score)
+        """
+        home_expected, away_expected = self.get_lambdas(home_team, away_team, game_data)
         
         # Add randomness
         home_score = max(0, int(random.gauss(home_expected, self.score_std_dev)))

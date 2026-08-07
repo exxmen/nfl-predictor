@@ -80,8 +80,23 @@ def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) ->
     
     if not completed_games:
         raise RuntimeError("Failed to fetch game data")
-    
+
     print(f"📊 Data: {len(teams_data)} teams, {len(completed_games)} completed games, {len(remaining_games)} remaining")
+    
+    # Fetch consensus market spreads (free via nfl_data_py schedule feed) and
+    # attach them to remaining games for market anchoring
+    market_weight = 0.0
+    try:
+        from nfl_predictor.market import fetch_spreads, attach_spreads_to_games, MARKET_WEIGHT
+        spreads = fetch_spreads(2025)
+        attached = attach_spreads_to_games(remaining_games, spreads)
+        market_weight = MARKET_WEIGHT if attached > 0 else 0.0
+        if attached:
+            print(f"📈 Market anchoring enabled: {attached} games with consensus spreads (weight={market_weight:.0%})")
+        else:
+            print("📈 No consensus spreads yet — market anchoring off for this run")
+    except Exception as e:
+        print(f"⚠️ Market data unavailable ({e}), running without market anchoring")
     
     # Load injury data
     injury_impacts = None
@@ -125,7 +140,8 @@ def run_simulation(n_simulations: int = 100000, use_intangibles: bool = True) ->
         show_progress=True,
         injury_impacts=injury_impacts,
         use_intangibles=use_intangibles,
-        intangibles_config=intangibles_config
+        intangibles_config=intangibles_config,
+        market_weight=market_weight
     )
 
     return {

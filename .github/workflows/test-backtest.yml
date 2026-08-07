@@ -1,0 +1,58 @@
+name: Test & Backtest
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --extra test
+
+      - name: Run unit tests
+        run: uv run pytest tests/ -v
+
+  backtest:
+    runs-on: ubuntu-latest
+    # Backtest hits the network (nfl_data_py) and is slow; run manually
+    # or on a schedule, not on every PR.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --extra test
+
+      - name: Run backtest suite (2021-2024)
+        run: uv run python -m nfl_predictor.backtest --seasons 2021 2022 2023 2024 --sims 1000
+
+      - name: Upload backtest summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-summary
+          path: results/
+          retention-days: 90
