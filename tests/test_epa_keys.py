@@ -41,15 +41,18 @@ def test_injury_impacts_normalized_from_abbreviation():
     so their adjustments actually apply during simulation."""
     sim = EPAGameSimulator(
         epa_df=_make_epa_df(),
-        injury_impacts={'KC': {'offensive_impact': 0.2}},
+        injury_impacts={'KC': {'offensive_impact': 0.5}},
     )
     # Re-keyed to full name
     assert 'Kansas City Chiefs' in sim.injury_impacts
-    assert sim.injury_impacts['Kansas City Chiefs']['offensive_impact'] == 0.2
-    # Injury now affects the expected score for the full-name key
-    l_no, l_with = sim.get_lambdas("Kansas City Chiefs", "Buffalo Bills", {})
-    # (offense is KC in the first call; a 0.2 offensive impact reduces its lambda)
-    assert l_with > 0  # sanity
+    assert sim.injury_impacts['Kansas City Chiefs']['offensive_impact'] == 0.5
+
+    # Injury must actually change the expected score: a 0.5 offensive impact
+    # on the offense should roughly halve its lambda. Home is the offense here.
+    baseline = EPAGameSimulator(epa_df=_make_epa_df())
+    h_no, a_no = baseline.get_lambdas("Kansas City Chiefs", "Buffalo Bills", {})
+    h_with, _ = sim.get_lambdas("Kansas City Chiefs", "Buffalo Bills", {})
+    assert h_with < h_no * 0.9, "injury impact did not reduce the injured offense's lambda"
 
 
 def test_game_momentum_normalized_from_abbreviation():

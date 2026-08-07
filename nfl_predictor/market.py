@@ -54,9 +54,22 @@ def _cache_valid(season: int, meta_file: Path) -> bool:
         current_season = get_current_season()
         if season < current_season:
             return cached_season == season
-        # Current season: refresh at least once per NFL week
-        from .config import get_current_nfl_week
-        return cached_season == season and meta.get("week", 0) >= get_current_nfl_week()
+        # Current season: refresh at least once per NFL week. Use the shared
+        # week-based validity helper so a cache fetched before a week's games
+        # start (Thursday kickoff) is not wrongly kept through game time.
+        from .config import get_current_nfl_week, is_cache_valid_for_week
+        current_week = get_current_nfl_week()
+        if cached_season != season:
+            return False
+        if meta.get("week", 0) < current_week:
+            return False
+        # Same week: honor the shared kickoff-aware invalidation rule.
+        updated = meta.get("updated")
+        try:
+            ts = datetime.fromisoformat(updated).timestamp() if updated else 0.0
+        except (TypeError, ValueError):
+            return False
+        return is_cache_valid_for_week(ts, int(meta.get("week", 0)))
     except Exception:
         return False
 
