@@ -10,6 +10,7 @@ This module provides the enhanced Monte Carlo simulation using:
 """
 
 import numpy as np
+import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -21,10 +22,14 @@ from .tiebreakers import (
     SeasonData,
     TeamStats,
     NFLTiebreaker,
+    GameSimulator,
     TEAM_TO_DIVISION,
     TEAM_TO_CONFERENCE,
     get_current_nfl_week
 )
+from .team_names import to_full_name
+
+logger = logging.getLogger(__name__)
 
 # Try to import EPA loader (optional enhancement)
 try:
@@ -160,7 +165,7 @@ class EPAGameSimulator:
     MOMENTUM_WEIGHT = 0.10
     MOMENTUM_POINTS_PER_SIGMA = 2.0  # Points adjustment per standard deviation
     
-    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None, injury_impacts: Optional[Dict[str, Dict[str, float]]] = None, use_momentum: bool = True, game_momentum: Optional[Dict[str, Dict[str, float]]] = None, prefer_game_momentum: bool = False, intangibles_config: Optional[IntangiblesConfig] = None, intangibles_calculator: Optional['IntangiblesCalculator'] = None):
+    def __init__(self, epa_df: Optional[pd.DataFrame] = None, season_data: Optional['SeasonData'] = None, injury_impacts: Optional[Dict[str, Dict[str, float]]] = None, use_momentum: bool = True, game_momentum: Optional[Dict[str, Dict[str, float]]] = None, prefer_game_momentum: bool = False, intangibles_config: Optional[IntangiblesConfig] = None, intangibles_calculator: Optional['IntangiblesCalculator'] = None, market_weight: float = 0.0):
         """
         Initialize EPA-based simulator.
 
@@ -173,19 +178,37 @@ class EPAGameSimulator:
             prefer_game_momentum: If True, prefer game momentum over EPA momentum (for current season)
             intangibles_config: Configuration for intangibles adjustments
             intangibles_calculator: Pre-configured IntangiblesCalculator instance
+            market_weight: Weight (0..1) blended toward market-implied scores when
+                a consensus spread is available. 0 disables market anchoring.
         """
+        self.market_weight = max(0.0, min(1.0, market_weight))
         self.epa_df = epa_df
         self.season_data = season_data
-        self.injury_impacts = injury_impacts or {}
+        # Normalize dict keys to canonical FULL names. Injury/momentum data
+        # sources (ESPN / nfl_data_py) key by abbreviation ("KC") but the
+        # simulation consumes full names, so without this the adjustments
+        # would silently never apply for abbrev-keyed input.
+        self.injury_impacts = self._normalize_team_dict(injury_impacts or {})
         self.use_momentum = use_momentum
-        self.game_momentum = game_momentum or {}
+        self.game_momentum = self._normalize_team_dict(game_momentum or {})
         self.prefer_game_momentum = prefer_game_momentum  # True for current season
         self.intangibles_config = intangibles_config
         self.intangibles_calculator = intangibles_calculator
 
-        # Build team lookup if EPA data available
+        # Build team lookup if EPA data available.
+        # nfl_data_py keys EPA by abbreviation (KC), but the simulation
+        # passes full names (Kansas City Chiefs). Index by BOTH so neither
+        # path can silently miss. Log a loud warning on any real miss.
         if epa_df is not None:
-            self.team_epa = epa_df.set_index('team').to_dict('index')
+            self.team_epa = {}
+            for _key, row in epa_df.iterrows():
+                abbr = row.get('team', row.get('index'))
+                if abbr is None or abbr == '':
+                    continue
+                rec = row.to_dict()
+                rec['team'] = abbr
+                self.team_epa[str(abbr)] = rec
+                self.team_epa[to_full_name(str(abbr))] = rec
             self.league_avg_ppg = epa_df['ppg'].mean() if 'ppg' in epa_df.columns else self.LEAGUE_AVG_PPG
             self.league_avg_off_epa = epa_df['off_epa'].mean()
             self.league_avg_def_epa = epa_df['def_epa'].mean()
@@ -197,15 +220,37 @@ class EPAGameSimulator:
             self.league_avg_off_epa = 0.0
             self.league_avg_def_epa = 0.0
             self.has_epa_momentum = False
+
+        # Track lookup misses so a key bug can never silently degrade again
+        self._lookup_miss_warned = set()
         
         # Determine which momentum source to use
         self.has_momentum = bool(self.game_momentum) if prefer_game_momentum else (self.has_epa_momentum or bool(self.game_momentum))
     
+    @staticmethod
+    def _normalize_team_dict(d: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+        """Re-key a {team: {impact...}} dict from abbreviation to full name."""
+        out = {}
+        for key, val in d.items():
+            out[to_full_name(str(key))] = val
+        return out
+
     def get_team_stats(self, team: str) -> dict:
         """Get EPA stats for a team, with fallback to league average."""
         if team in self.team_epa:
             return self.team_epa[team]
-        
+
+        # Last-chance: normalize abbreviation -> full name for the EPA lookup
+        normalized = to_full_name(team)
+        if normalized in self.team_epa:
+            return self.team_epa[normalized]
+
+        # Real miss: warn loudly (once per team) instead of silently degrading
+        if team not in self._lookup_miss_warned:
+            logger.warning("EPA lookup miss for '%s' — using league averages "
+                           "(check team-name normalization in team_names.py)", team)
+            self._lookup_miss_warned.add(team)
+
         # Fallback to league averages
         return {
             'off_epa': self.league_avg_off_epa,
@@ -385,6 +430,40 @@ class EPAGameSimulator:
 
         return max(7.0, home_lambda), max(7.0, away_lambda)
     
+    def get_lambdas(self, home_team: str, away_team: str, game_data: Optional[Dict] = None) -> Tuple[float, float]:
+        """
+        Compute (home_lambda, away_lambda) for a matchup WITHOUT sampling.
+
+        Lambdas depend only on static inputs (EPA, injuries, momentum,
+        intangibles, market spread) — never on simulated season state — so
+        they can be precomputed once and reused across all Monte Carlo runs.
+        """
+        # Normalize both keys to canonical full names so downstream logic
+        # (EPA, injuries, momentum, intangibles) sees one consistent key form.
+        home_team = to_full_name(home_team)
+        away_team = to_full_name(away_team)
+
+        home_lambda = self.calculate_expected_score(home_team, away_team, is_home=True)
+        away_lambda = self.calculate_expected_score(away_team, home_team, is_home=False)
+
+        # Apply intangibles adjustments
+        if self.intangibles_calculator:
+            home_lambda, away_lambda = self.apply_intangibles_adjustment(
+                home_team, away_team, home_lambda, away_lambda, game_data
+            )
+
+        # Blend toward market-implied scores when a consensus spread exists
+        if self.market_weight > 0 and game_data and game_data.get('home_spread') is not None:
+            from .market import market_implied_scores, DEFAULT_TOTAL
+            mkt_home, mkt_away = market_implied_scores(
+                game_data['home_spread'], total=DEFAULT_TOTAL
+            )
+            w = self.market_weight
+            home_lambda = (1 - w) * home_lambda + w * mkt_home
+            away_lambda = (1 - w) * away_lambda + w * mkt_away
+
+        return home_lambda, away_lambda
+
     def simulate_game(self, home_team: str, away_team: str, game_data: Optional[Dict] = None) -> Tuple[int, int]:
         """
         Simulate a single game using Poisson scoring model.
@@ -397,51 +476,41 @@ class EPAGameSimulator:
         Returns:
             Tuple of (home_score, away_score)
         """
-        # Calculate expected scores
-        home_lambda = self.calculate_expected_score(home_team, away_team, is_home=True)
-        away_lambda = self.calculate_expected_score(away_team, home_team, is_home=False)
+        home_lambda, away_lambda = self.get_lambdas(home_team, away_team, game_data)
 
-        # Apply intangibles adjustments
-        if self.intangibles_calculator:
-            home_lambda, away_lambda = self.apply_intangibles_adjustment(
-                home_team, away_team, home_lambda, away_lambda, game_data
-            )
-
-        # Sample from Poisson distributions
+        # Sample from Poisson distributions. Ties are left as-is: NFL
+        # regular-season ties are rare but real and must remain ties.
         home_score = poisson.rvs(home_lambda)
         away_score = poisson.rvs(away_lambda)
 
-        # Handle ties (rare in NFL, ~1% of games)
-        # Simulate OT with 50/50 coinflip if tied
-        if home_score == away_score:
-            # In NFL, ~57% of OT games are won by receiving team
-            # But for simplicity, just give slight home advantage
-            if np.random.random() < 0.52:
-                home_score += 3  # Home team wins with FG
-            else:
-                away_score += 3
-
         return int(home_score), int(away_score)
     
-    def get_win_probability(self, home_team: str, away_team: str, n_sims: int = 1000) -> dict:
+    def get_win_probability(self, home_team: str, away_team: str, n_sims: int = 1000,
+                            game_data: Optional[Dict] = None) -> dict:
         """
         Calculate win probability for a matchup via simulation.
-        
+
+        Args:
+            home_team: Home team (full name or abbreviation; EPA is indexed by both)
+            away_team: Away team (full name or abbreviation)
+            n_sims: Number of simulations
+            game_data: Optional dict with game context (home_spread, etc.).
+                When a spread is present and market_weight > 0, the market
+                blend is applied so win probs reflect anchoring.
         Returns:
             Dict with 'home_win', 'away_win', 'home_expected', 'away_expected'
         """
-        home_lambda = self.calculate_expected_score(home_team, away_team, is_home=True)
-        away_lambda = self.calculate_expected_score(away_team, home_team, is_home=False)
-        
+        home_lambda, away_lambda = self.get_lambdas(home_team, away_team, game_data)
+
         home_scores = poisson.rvs(home_lambda, size=n_sims)
         away_scores = poisson.rvs(away_lambda, size=n_sims)
-        
+
         home_wins = np.sum(home_scores > away_scores)
         ties = np.sum(home_scores == away_scores)
-        
+
         # Split ties evenly
         home_win_pct = (home_wins + ties * 0.5) / n_sims
-        
+
         return {
             'home_win': home_win_pct,
             'away_win': 1 - home_win_pct,
@@ -561,7 +630,8 @@ def run_advanced_simulation(
     injury_impacts: Optional[Dict[str, Dict[str, float]]] = None,
     use_momentum: bool = True,
     use_intangibles: bool = False,
-    intangibles_config: Optional[IntangiblesConfig] = None
+    intangibles_config: Optional[IntangiblesConfig] = None,
+    market_weight: float = 0.0
 ) -> Dict[str, Dict]:
     """
     Run Monte Carlo simulation with real NFL tiebreakers.
@@ -578,6 +648,9 @@ def run_advanced_simulation(
         use_momentum: Whether to apply momentum adjustments (default: True)
         use_intangibles: Whether to apply intangibles adjustments (default: False)
         intangibles_config: Configuration for intangibles adjustments
+        market_weight: Blend weight toward closing consensus spreads (0.0 = off).
+            When > 0 and a game has a home_spread, expected scores are blended
+            toward the market-implied scores (see market.py).
 
     Returns:
         Dictionary with simulation results for each team
@@ -658,7 +731,8 @@ def run_advanced_simulation(
             game_momentum=game_momentum,
             prefer_game_momentum=prefer_game_momentum,
             intangibles_config=intangibles_config,
-            intangibles_calculator=intangibles_calculator
+            intangibles_calculator=intangibles_calculator,
+            market_weight=market_weight
         )
         if simulator.has_momentum and use_momentum:
             if is_current_season and game_momentum:
@@ -672,8 +746,83 @@ def run_advanced_simulation(
     
     # Progress bar
     iterator = tqdm(range(n_simulations), desc="Simulating seasons", disable=not show_progress)
-    
-    for _ in iterator:
+
+    # ------------------------------------------------------------------
+    # Vectorization setup: lambdas depend only on static inputs (EPA,
+    # injuries, momentum, intangibles, spread), never on simulated season
+    # state. So we precompute them ONCE per game and vectorize the Poisson
+    # draws across all simulations, instead of re-deriving them and calling
+    # scalar rvs() for every game in every run.
+    # ------------------------------------------------------------------
+    game_specs = []
+    for game in remaining_games:
+        home_team = base_season.teams.get(game.home_team)
+        away_team = base_season.teams.get(game.away_team)
+        if not home_team or not away_team:
+            continue
+
+        # Build game data dict for intangibles (static per game)
+        from datetime import datetime
+        game_data = {}
+        if game.gameday:
+            try:
+                game_data['date'] = datetime.strptime(game.gameday, '%Y-%m-%d').date()
+            except Exception:
+                game_data['date'] = datetime.now().date()
+        else:
+            game_data['date'] = datetime.now().date()
+
+        if game.home_rest is not None and game.away_rest is not None:
+            game_data['home_rest'] = game.home_rest
+            game_data['away_rest'] = game.away_rest
+        game_data['is_thursday_night'] = game.is_thursday_night
+        game_data['is_monday_night'] = game.is_monday_night
+        game_data['is_division'] = game.is_division
+        if game.temp is not None or game.wind is not None:
+            game_data['weather_data'] = {'temp': game.temp or 70, 'wind': game.wind or 0}
+        if game.gametime:
+            is_early = game.gametime.startswith('13:') or game.gametime.startswith('16:05')
+            game_data['is_early_et_game'] = is_early
+        if game.home_spread is not None:
+            game_data['home_spread'] = game.home_spread
+
+        home_lambda, away_lambda = simulator.get_lambdas(
+            game.home_team, game.away_team, game_data
+        )
+        game_specs.append((game, home_team, away_team, home_lambda, away_lambda))
+
+    n_games = len(game_specs)
+    if n_games == 0:
+        print("⚠️  No remaining games to simulate")
+        for team_name in results:
+            results[team_name]['avg_wins'] = base_season.teams[team_name].wins
+        return results
+
+    # Vectorized score draws: one array of size n_simulations per game.
+    # (Vectorized draws are ~10-50x faster than n_games*n_sims scalar calls.)
+    # Use the matching distribution for whichever simulator is active so
+    # backtest comparisons reflect each model's actual stochastic model
+    # rather than silently re-mapping everything to Poisson.
+    home_scores_mat = []
+    away_scores_mat = []
+    is_epa = isinstance(simulator, EPAGameSimulator)
+    for _, _, _, home_l, away_l in game_specs:
+        if is_epa:
+            # EPA model: Poisson scoring (discrete, right-skewed)
+            home_scores_mat.append(poisson.rvs(home_l, size=n_simulations).astype(np.int16))
+            away_scores_mat.append(poisson.rvs(away_l, size=n_simulations).astype(np.int16))
+        else:
+            # Non-EPA / traditional model: Gaussian (kept consistent with
+            # GameSimulator.simulate_game() which uses int(gauss(..)) truncation)
+            std = simulator.score_std_dev
+            home_scores_mat.append(
+                np.random.normal(home_l, std, size=n_simulations).clip(min=0).astype(np.int16)
+            )
+            away_scores_mat.append(
+                np.random.normal(away_l, std, size=n_simulations).clip(min=0).astype(np.int16)
+            )
+
+    for sim_idx in iterator:
         # Deep copy the season data for this simulation
         sim_teams = {}
         for name, team in base_season.teams.items():
@@ -695,58 +844,19 @@ def run_advanced_simulation(
                 avg_points_for=team.avg_points_for,
                 avg_points_against=team.avg_points_against
             )
-        
+
         sim_completed = list(completed_games)
-        
-        # Simulate remaining games
-        for game in remaining_games:
-            home_team = sim_teams.get(game.home_team)
-            away_team = sim_teams.get(game.away_team)
 
-            if not home_team or not away_team:
-                continue
+        # Apply results of each remaining game for this simulation
+        for gi, (game, _, _, _, _) in enumerate(game_specs):
+            home_score = int(home_scores_mat[gi][sim_idx])
+            away_score = int(away_scores_mat[gi][sim_idx])
 
-            # Build game data dict for intangibles
-            from datetime import datetime
-            game_data = {}
-            if game.gameday:
-                try:
-                    game_data['date'] = datetime.strptime(game.gameday, '%Y-%m-%d').date()
-                except:
-                    game_data['date'] = datetime.now().date()
-            else:
-                game_data['date'] = datetime.now().date()
-
-            # Rest days - use actual rest from Game if available
-            if game.home_rest is not None and game.away_rest is not None:
-                game_data['home_rest'] = game.home_rest
-                game_data['away_rest'] = game.away_rest
-
-            # TNF/MNF flags
-            game_data['is_thursday_night'] = game.is_thursday_night
-            game_data['is_monday_night'] = game.is_monday_night
-
-            # Division game
-            game_data['is_division'] = game.is_division
-
-            # Weather
-            if game.temp is not None or game.wind is not None:
-                game_data['weather_data'] = {
-                    'temp': game.temp or 70,
-                    'wind': game.wind or 0
-                }
-
-            # Early ET game (1pm or 4:05pm ET games)
-            if game.gametime:
-                is_early = game.gametime.startswith('13:') or game.gametime.startswith('16:05')
-                game_data['is_early_et_game'] = is_early
-
-            # Simulate the game with intangibles context
-            home_score, away_score = simulator.simulate_game(
-                game.home_team,
-                game.away_team,
-                game_data=game_data
-            )
+            # Ties are left as-is: NFL regular-season ties are rare but real
+            # (~1% of games) and must remain ties because they affect win% and
+            # tiebreakers. The tie branch below records them as ties.
+            home_team = sim_teams[game.home_team]
+            away_team = sim_teams[game.away_team]
 
             sim_game = Game(
                 week=game.week,
@@ -757,7 +867,7 @@ def run_advanced_simulation(
                 completed=True
             )
             sim_completed.append(sim_game)
-            
+
             # Update stats
             if home_score > away_score:
                 home_team.wins += 1
@@ -778,7 +888,6 @@ def run_advanced_simulation(
                     away_team.conf_wins += 1
                     home_team.conf_losses += 1
             else:
-                # Tie
                 home_team.ties += 1
                 away_team.ties += 1
                 if home_team.division == away_team.division:
@@ -787,8 +896,7 @@ def run_advanced_simulation(
                 if home_team.conference == away_team.conference:
                     home_team.conf_ties += 1
                     away_team.conf_ties += 1
-            
-            # Update points
+
             home_team.points_for += home_score
             home_team.points_against += away_score
             away_team.points_for += away_score

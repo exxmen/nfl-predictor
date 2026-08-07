@@ -11,6 +11,7 @@ Updated automatically via GitHub Actions every Tuesday and Friday during the NFL
 ## Features
 
 - 📈 **EPA-Based Scoring Model**: Uses Expected Points Added (EPA) from play-by-play data with Poisson distribution for realistic score simulation
+- 💰 **Market Anchoring**: Blends predictions toward consensus closing spreads (free via nfl_data_py schedule feed) — no paid API required
 - 🔥 **Momentum/Recent Form**: Adjusts predictions based on team's last 4 games vs season average (hot streaks matter!)
 - 🏥 **Injury Impact Analysis**: Scrapes ESPN injuries, matches to snap counts for starter detection, adjusts team strength based on player availability
 - 🏈 **Real NFL Tiebreaker Rules**: Implements all 12 division and 11 wild card tiebreaker steps
@@ -30,7 +31,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Clone and run
 git clone https://github.com/exxmen/nfl-predictor.git
 cd nfl-predictor
-uv run python main.py
+uv sync
+uv run nfl-predict
 ```
 ## Intangibles
 
@@ -56,22 +58,22 @@ nfl-predict --no-intangibles
 ### Interactive Mode
 ```bash
 # Default: 10,000 simulations
-uv run python main.py
+uv run nfl-predict
 
 # More simulations for higher accuracy
-uv run python main.py -n 50000
+uv run nfl-predict -n 50000
 
 # Simple mode (no tiebreakers, faster)
-uv run python main.py --simple
+uv run nfl-predict --simple
 ```
 
 ### Scheduled Mode
 ```bash
 # Test run (1,000 simulations)
-uv run python scheduled_run.py --simulations 1000
+uv run nfl-scheduled --simulations 1000
 
 # Production (100K simulations, saves to results/)
-uv run python scheduled_run.py --simulations 100000
+uv run nfl-scheduled --simulations 100000
 ```
 
 ## How It Works
@@ -85,6 +87,18 @@ uv run python scheduled_run.py --simulations 100000
 7. **Applies full NFL tiebreakers** to determine playoff seeds
 8. **Aggregates results** across 100,000 simulations
 
+## Market Anchoring
+
+When a consensus closing spread is available for a remaining game (pulled from the `spread_line` column of the free nfl_data_py schedule feed), the simulator blends its EPA-based expected score toward the market-implied score:
+
+```
+final = (1 - w) * model + w * market,  where w = 0.30 by default
+```
+
+This is the single highest-value accuracy lever: the closing line is the most-informed prior available. No API key or paid tier required. If a game has no line yet, it's simply skipped (market anchoring stays off for that game). The blend weight `MARKET_WEIGHT` in `market.py` can be tuned via backtest.
+
+To disable market anchoring entirely, pass `market_weight=0.0` to `run_advanced_simulation`.
+
 ## GitHub Actions
 
 The workflow runs automatically:
@@ -97,15 +111,17 @@ Results are published to the [Gist](https://gist.github.com/exxmen/7c1a962fbe394
 
 | File | Description |
 |------|-------------|
-| `main.py` | Main entry point, interactive mode |
-| `scheduled_run.py` | Automated script, saves results to files |
-| `advanced_simulation.py` | Monte Carlo simulation engine with EPA-based Poisson scoring |
-| `injury_loader.py` | ESPN injury scraper with nfl_data_py fallback |
-| `player_impact.py` | Position-based injury impact calculation |
-| `epa_loader.py` | Fetches and caches EPA data from nfl_data_py |
-| `backtest.py` | Model validation against historical seasons |
-| `nfl_tiebreakers.py` | NFL tiebreaker rules implementation |
-| `pfr_scraper.py` | Pro-Football-Reference HTTP scraper |
+| `nfl_predictor/cli.py` | Main entry point, interactive mode (`nfl-predict`) |
+| `nfl_predictor/scheduler.py` | Automated scheduled runner, saves results (`nfl-scheduled`) |
+| `nfl_predictor/simulation.py` | Monte Carlo engine with EPA-based Poisson scoring |
+| `nfl_predictor/epa.py` | Fetches and caches EPA data from nfl_data_py |
+| `nfl_predictor/market.py` | Consensus spread data (free via nfl_data_py) + market anchoring |
+| `nfl_predictor/injuries.py` | ESPN injury scraper with nfl_data_py fallback |
+| `nfl_predictor/player_impact.py` | Position-based injury impact calculation |
+| `nfl_predictor/intangibles.py` | Rest, travel, weather, turnover-luck adjustments |
+| `nfl_predictor/backtest.py` | Model validation: Brier, log-loss, calibration (ECE), market benchmark |
+| `nfl_predictor/tiebreakers.py` | NFL tiebreaker rules implementation |
+| `nfl_predictor/scraper.py` | Pro-Football-Reference HTTP scraper |
 
 ## Backtest Results
 
