@@ -9,7 +9,7 @@ produce mismatched keys; every consumer should resolve through this module
 so a lookup can never silently miss again.
 """
 
-# Abbreviation -> full name (32 teams)
+# Abbreviation -> full name (32 teams; LA and LAR are both aliases for the Rams)
 ABBREV_TO_FULL = {
     'ARI': 'Arizona Cardinals', 'ATL': 'Atlanta Falcons', 'BAL': 'Baltimore Ravens',
     'BUF': 'Buffalo Bills', 'CAR': 'Carolina Panthers', 'CHI': 'Chicago Bears',

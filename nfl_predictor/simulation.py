@@ -775,14 +775,29 @@ def run_advanced_simulation(
             results[team_name]['avg_wins'] = base_season.teams[team_name].wins
         return results
 
-    # Vectorized Poisson draws: one array of size n_simulations per game.
-    # (Vectorized scipy draws are ~10-50x faster than n_games*n_sims scalar calls.)
-    # Cast to int16: NFL scores fit comfortably (max real ~70), which cuts
-    # memory ~4x vs the default int64 (important early-season / high-n_sims runs).
-    home_scores_mat = [poisson.rvs(home_l, size=n_simulations).astype(np.int16)
-                       for _, _, _, home_l, _ in game_specs]
-    away_scores_mat = [poisson.rvs(away_l, size=n_simulations).astype(np.int16)
-                       for _, _, _, _, away_l in game_specs]
+    # Vectorized score draws: one array of size n_simulations per game.
+    # (Vectorized draws are ~10-50x faster than n_games*n_sims scalar calls.)
+    # Use the matching distribution for whichever simulator is active so
+    # backtest comparisons reflect each model's actual stochastic model
+    # rather than silently re-mapping everything to Poisson.
+    home_scores_mat = []
+    away_scores_mat = []
+    is_epa = isinstance(simulator, EPAGameSimulator)
+    for _, _, _, home_l, away_l in game_specs:
+        if is_epa:
+            # EPA model: Poisson scoring (discrete, right-skewed)
+            home_scores_mat.append(poisson.rvs(home_l, size=n_simulations).astype(np.int16))
+            away_scores_mat.append(poisson.rvs(away_l, size=n_simulations).astype(np.int16))
+        else:
+            # Non-EPA / traditional model: Gaussian (kept consistent with
+            # GameSimulator.simulate_game() so backtest results match)
+            std = simulator.score_std_dev
+            home_scores_mat.append(
+                np.random.normal(home_l, std, size=n_simulations).clip(min=0).round().astype(np.int16)
+            )
+            away_scores_mat.append(
+                np.random.normal(away_l, std, size=n_simulations).clip(min=0).round().astype(np.int16)
+            )
 
     for sim_idx in iterator:
         # Deep copy the season data for this simulation
