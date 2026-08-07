@@ -164,7 +164,7 @@ class NFLBacktester:
         },
     }
     
-    def __init__(self, use_epa: bool = True, use_intangibles: bool = False, intangibles_config: Optional[IntangiblesConfig] = None):
+    def __init__(self, use_epa: bool = True, use_intangibles: bool = False, intangibles_config: Optional[IntangiblesConfig] = None, market_weight: float = 0.0):
         """
         Initialize backtester.
 
@@ -172,10 +172,13 @@ class NFLBacktester:
             use_epa: Whether to use EPA-based model (True) or traditional model (False)
             use_intangibles: Whether to use intangibles adjustments
             intangibles_config: Configuration for intangibles adjustments
+            market_weight: Weight (0..1) to blend toward consensus spreads when
+                computing win probabilities. 0 = pure EPA model (no anchoring).
         """
         self.use_epa = use_epa
         self.use_intangibles = use_intangibles
         self.intangibles_config = intangibles_config
+        self.market_weight = market_weight
         self.results: List[BacktestResult] = []
     
     def fetch_season_data(self, season: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -280,7 +283,8 @@ class NFLBacktester:
                 is_monday_night=is_monday,
                 is_division=bool(row['div_game']) if pd.notna(row['div_game']) else False,
                 temp=int(row['temp']) if pd.notna(row['temp']) else None,
-                wind=float(row['wind']) if pd.notna(row['wind']) else None
+                wind=float(row['wind']) if pd.notna(row['wind']) else None,
+                home_spread=float(row['spread_line']) if pd.notna(row.get('spread_line')) else None
             ))
 
         return games
@@ -376,11 +380,38 @@ class NFLBacktester:
             season=season,
             injury_impacts=injury_impacts,
             use_intangibles=self.use_intangibles,
-            intangibles_config=self.intangibles_config
+            intangibles_config=self.intangibles_config,
+            market_weight=self.market_weight
         )
         
         return results
     
+    def get_actual_playoffs(self, season: int, schedule: Optional[pd.DataFrame] = None) -> Dict[str, List[str]]:
+        """
+        Get the actual playoff field for a season.
+
+        Prefers deriving from the schedule's game_type column (WC/DIV/CON/SB
+        games identify the teams that made the playoffs) so any season works,
+        and falls back to the hardcoded ACTUAL_PLAYOFFS dict when schedule data
+        or the game_type column is unavailable.
+        """
+        hardcoded = self.ACTUAL_PLAYOFFS.get(season)
+        if schedule is not None and 'game_type' in schedule.columns:
+            post = schedule[schedule['game_type'].isin(['WC', 'DIV', 'CON', 'SB'])]
+            if not post.empty:
+                from .team_names import to_full_name
+                teams_in_post = set(post['home_team'].tolist() + post['away_team'].tolist())
+                afc, nfc = [], []
+                for abbr in sorted(teams_in_post):
+                    conf = ABBREV_TO_CONF.get(abbr)
+                    full = to_full_name(abbr)
+                    (afc if conf == 'AFC' else nfc).append(full)
+                if afc and nfc:
+                    return {'AFC': afc, 'NFC': nfc}
+        if hardcoded is not None:
+            return hardcoded
+        return {'AFC': [], 'NFC': []}
+
     def calculate_playoff_accuracy(
         self, 
         predictions: Dict[str, Dict], 
@@ -555,7 +586,7 @@ class NFLBacktester:
         # Load EPA for game predictions
         if self.use_epa and EPA_AVAILABLE:
             epa_df = load_team_epa(season=season, force_refresh=False)
-            simulator = EPAGameSimulator(epa_df=epa_df)
+            simulator = EPAGameSimulator(epa_df=epa_df, market_weight=self.market_weight)
         else:
             simulator = None
         
@@ -566,10 +597,12 @@ class NFLBacktester:
             home = row['home_team']
             away = row['away_team']
             home_won = row['home_score'] > row['away_score']
+            spread = float(row['spread_line']) if pd.notna(row.get('spread_line')) else None
             
-            # Get win probability
+            # Get win probability (with market anchoring when a spread exists)
             if simulator:
-                probs = simulator.get_win_probability(home, away, n_sims=100)
+                game_data = {'home_spread': spread} if spread is not None else {}
+                probs = simulator.get_win_probability(home, away, n_sims=100, game_data=game_data)
                 home_prob = probs['home_win']
             else:
                 # Simple baseline: home team wins ~57% historically
@@ -581,7 +614,7 @@ class NFLBacktester:
                 'home_win_prob': home_prob,
                 'home_won': home_won,
                 'week': int(row['week']),
-                'home_spread': float(row['spread_line']) if pd.notna(row.get('spread_line')) else None
+                'home_spread': spread
             })
             
             # Count correct picks (predict winner with >50%)
@@ -597,7 +630,7 @@ class NFLBacktester:
         mkt = self.calculate_market_benchmark(game_preds)
 
         # Playoff accuracy
-        actual = self.ACTUAL_PLAYOFFS.get(season, {'AFC': [], 'NFC': []})
+        actual = self.get_actual_playoffs(season, schedule)
         playoff_acc = self.calculate_playoff_accuracy(predictions, actual, n_simulations)
 
         result = BacktestResult(
@@ -740,6 +773,10 @@ def main():
     parser.add_argument("--no-epa", action="store_true", help="Use traditional model only")
     parser.add_argument("--intangibles", action="store_true", help="Enable intangibles adjustments")
     parser.add_argument("--compare-intangibles", action="store_true", help="Compare with vs without intangibles")
+    parser.add_argument("--market", type=float, metavar="W", default=0.0,
+                        help="Blend weight toward consensus spreads (e.g. 0.30). 0 = pure EPA model")
+    parser.add_argument("--compare-market", action="store_true",
+                        help="Compare pure EPA model vs market-anchored model")
     args = parser.parse_args()
 
     intangibles_config = None
@@ -755,10 +792,38 @@ def main():
     backtester = NFLBacktester(
         use_epa=not args.no_epa,
         use_intangibles=args.intangibles,
-        intangibles_config=intangibles_config
+        intangibles_config=intangibles_config,
+        market_weight=args.market
     )
 
-    if args.compare_intangibles:
+    if args.compare_market:
+        # Compare pure EPA model vs market-anchored model
+        print("\n" + "="*60)
+        print("  MARKET ANCHORING COMPARISON")
+        print("="*60)
+
+        print("\n🔬 Running backtest WITHOUT market anchoring (pure EPA)...")
+        backtester.market_weight = 0.0
+        result_plain = backtester.backtest_season(args.season, args.week, args.sims)
+
+        print("\n🔬 Running backtest WITH market anchoring...")
+        backtester.market_weight = 0.30
+        result_market = backtester.backtest_season(args.season, args.week, args.sims)
+
+        print(f"\n{'='*60}")
+        print(f"  MARKET ANCHORING COMPARISON RESULTS")
+        print(f"{'='*60}")
+        print(f"\n{'Metric':<18} {'Pure EPA':>12} {'Anchored':>12} {'Winner':>12}")
+        print("-" * 54)
+        brier_winner = "Anchored" if result_market.brier_score < result_plain.brier_score else "Pure EPA"
+        ll_winner = "Anchored" if result_market.log_loss < result_plain.log_loss else "Pure EPA"
+        win_winner = "Anchored" if result_market.win_accuracy > result_plain.win_accuracy else "Pure EPA"
+        print(f"{'Brier Score':<18} {result_plain.brier_score:>12.4f} {result_market.brier_score:>12.4f} {brier_winner:>12}")
+        print(f"{'Log-loss':<18} {result_plain.log_loss:>12.4f} {result_market.log_loss:>12.4f} {ll_winner:>12}")
+        print(f"{'Win accuracy':<18} {result_plain.win_accuracy*100:>11.1f}% {result_market.win_accuracy*100:>11.1f}% {win_winner:>12}")
+        print(f"{'ECE (calib)':<18} {result_plain.ece:>12.4f} {result_market.ece:>12.4f}")
+        return
+    elif args.compare_intangibles:
         # Compare with vs without intangibles
         print("\n" + "="*60)
         print("  INTANGIBLES COMPARISON")

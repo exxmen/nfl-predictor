@@ -474,25 +474,32 @@ class EPAGameSimulator:
 
         return int(home_score), int(away_score)
     
-    def get_win_probability(self, home_team: str, away_team: str, n_sims: int = 1000) -> dict:
+    def get_win_probability(self, home_team: str, away_team: str, n_sims: int = 1000,
+                            game_data: Optional[Dict] = None) -> dict:
         """
         Calculate win probability for a matchup via simulation.
-        
+
+        Args:
+            home_team: Home team abbreviation
+            away_team: Away team abbreviation
+            n_sims: Number of simulations
+            game_data: Optional dict with game context (home_spread, etc.).
+                When a spread is present and market_weight > 0, the market
+                blend is applied so win probs reflect anchoring.
         Returns:
             Dict with 'home_win', 'away_win', 'home_expected', 'away_expected'
         """
-        home_lambda = self.calculate_expected_score(home_team, away_team, is_home=True)
-        away_lambda = self.calculate_expected_score(away_team, home_team, is_home=False)
-        
+        home_lambda, away_lambda = self.get_lambdas(home_team, away_team, game_data)
+
         home_scores = poisson.rvs(home_lambda, size=n_sims)
         away_scores = poisson.rvs(away_lambda, size=n_sims)
-        
+
         home_wins = np.sum(home_scores > away_scores)
         ties = np.sum(home_scores == away_scores)
-        
+
         # Split ties evenly
         home_win_pct = (home_wins + ties * 0.5) / n_sims
-        
+
         return {
             'home_win': home_win_pct,
             'away_win': 1 - home_win_pct,
