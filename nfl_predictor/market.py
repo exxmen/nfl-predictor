@@ -18,6 +18,7 @@ from typing import Dict, Optional, Tuple
 
 import nfl_data_py as nfl
 import pandas as pd
+import numpy as np
 
 from .team_names import to_full_name
 
@@ -114,7 +115,13 @@ def _current_week(season: int) -> int:
 def _df_to_spreads(df: pd.DataFrame) -> Dict[Tuple[str, str], Optional[float]]:
     out = {}
     for _, row in df.iterrows():
-        out[(row["home_full"], row["away_full"])] = row.get("spread")
+        spread = row.get("spread")
+        # DataFrame float columns turn missing values into NaN, not None;
+        # normalize so attach_spreads_to_games treats them as absent.
+        if spread is None or (isinstance(spread, float) and np.isnan(spread)):
+            out[(row["home_full"], row["away_full"])] = None
+        else:
+            out[(row["home_full"], row["away_full"])] = float(spread)
     return out
 
 

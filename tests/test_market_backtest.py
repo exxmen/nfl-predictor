@@ -110,3 +110,28 @@ def test_market_benchmark_pickem_counts_half_credit():
     assert mkt["n_with_spread"] == 2
     # 0.5 (pick'em) + 1.0 (correct favorite) = 1.5 / 2 = 0.75
     assert mkt["market_win_accuracy"] == pytest.approx(0.75)
+
+
+def test_df_to_spreads_treats_nan_as_missing():
+    """DataFrame float columns turn missing spreads into NaN; must map to None
+    so attach_spreads_to_games doesn't anchor on a NaN spread."""
+    import pandas as pd
+    import numpy as np
+    from nfl_predictor.market import _df_to_spreads, attach_spreads_to_games
+    from nfl_predictor.tiebreakers import Game
+
+    df = pd.DataFrame([
+        {"home_full": "Kansas City Chiefs", "away_full": "Buffalo Bills", "spread": np.nan},
+        {"home_full": "Green Bay Packers", "away_full": "Detroit Lions", "spread": 3.5},
+    ])
+    spreads = _df_to_spreads(df)
+    assert spreads[("Kansas City Chiefs", "Buffalo Bills")] is None
+    assert spreads[("Green Bay Packers", "Detroit Lions")] == 3.5
+
+    # attach_spreads_to_games must NOT attach the NaN line
+    games = [Game(2, "Kansas City Chiefs", "Buffalo Bills", completed=False),
+             Game(2, "Green Bay Packers", "Detroit Lions", completed=False)]
+    attached = attach_spreads_to_games(games, spreads)
+    assert attached == 1
+    assert games[0].home_spread is None
+    assert games[1].home_spread == 3.5
